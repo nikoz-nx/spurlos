@@ -196,11 +196,19 @@ def build_requests() -> dict:
         db.event(rid, "created", "Anfrage angelegt")
         created[kind] += 1
     # Abgewählte Firmen: noch nicht verschickte Anfragen entfernen.
-    for r in db.query("SELECT r.id, r.status, b.* FROM requests r JOIN brokers b ON b.id = r.broker_id "
+    # Nachgetragene Kontakte (z. B. nach einem Update der Firmenliste): Anfrage auf den neuen Weg umstellen.
+    for r in db.query("SELECT r.id, r.status, r.channel, b.* FROM requests r JOIN brokers b ON b.id = r.broker_id "
                       "WHERE r.status IN ('planned', 'no_contact', 'webform', 'letter')"):
         if not brokers.selected(r, groups, countries):
             db.execute("DELETE FROM events WHERE request_id = ?", (r["id"],))
             db.execute("DELETE FROM requests WHERE id = ?", (r["id"],))
+            continue
+        kind = brokers.contact_kind(r)
+        if kind != r["channel"]:
+            status = {"email": "planned", "webform": "webform", "letter": "letter", "none": "no_contact"}[kind]
+            _set(r["id"], status=status, channel=kind, planned_for=None)
+            db.event(r["id"], "created", "Kontaktweg aktualisiert: %s" % {"email": "E-Mail", "webform": "Webformular",
+                                                                           "letter": "Brief", "none": "kein Kontakt"}[kind])
     plan_batches()
     return created
 

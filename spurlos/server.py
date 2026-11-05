@@ -96,6 +96,12 @@ def start(port: int = 8765, with_scheduler: bool = True) -> Running:
     """Datenbank öffnen, Server im Hintergrund starten, Abläufe anwerfen."""
     db.init()
     brokers.load_seed()
+    if db.get("started"):
+        # Nach einem Update können Firmen neue Kontaktwege haben: Anfragen entsprechend anpassen.
+        try:
+            engine.run_locked(engine.build_requests)
+        except Exception:  # noqa: BLE001
+            pass
 
     first = port
     while not _port_free(port) and port < first + 20:

@@ -99,6 +99,14 @@ def load_seed() -> int:
     entries = json.loads(path.read_text(encoding="utf-8"))
     for entry in entries:
         upsert(entry)
+    # Firmen, die es nicht mehr gibt: abschalten und offene Anfragen entfernen (nur wenn nicht vom Nutzer bearbeitet)
+    for bid in _excluded().get("ids") or []:
+        row = db.query_one("SELECT id, user_edited, active FROM brokers WHERE id = ?", (bid,))
+        if row and not row["user_edited"] and row["active"]:
+            db.execute("UPDATE brokers SET active = 0 WHERE id = ?", (bid,))
+            for r in db.query("SELECT id FROM requests WHERE broker_id = ? AND status IN ('planned', 'no_contact', 'webform', 'letter')", (bid,)):
+                db.execute("DELETE FROM events WHERE request_id = ?", (r["id"],))
+                db.execute("DELETE FROM requests WHERE id = ?", (r["id"],))
     return len(entries)
 
 

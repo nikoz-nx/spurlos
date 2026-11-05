@@ -13,7 +13,8 @@
   "da-universum-business",
   "inc-arkeero",
   "inc-ermes",
-  "inc-fetcher"
+  "inc-fetcher",
+  "da-branchenflat"
  ],
  "incogni_alias": {
   "apollo": "da-apollo-io",

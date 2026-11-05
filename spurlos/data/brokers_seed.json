@@ -577,29 +577,6 @@
   "notes": "DSB-Adresse dpo@azerion.com laut Plattform-Datenschutzerklärung für Fragen; Betroffenenrechte verweisen auf diese Kontaktdaten. Opt-out personalisierter Werbung: https://myads.360yield.com/. Sublime gehört ebenfalls zu Azerion (siehe Eintrag Sublime)."
  },
  {
-  "id": "da-branchenflat",
-  "name": "B2B Adressenmarketing GmbH",
-  "category": "Firmen- und Kontaktdatenbank",
-  "grp": "b2b",
-  "what": "B2B-Firmenadressen",
-  "origin": "datenanfragen",
-  "region": "DE",
-  "countries": [
-   "de"
-  ],
-  "lang": "de",
-  "email": null,
-  "webform": null,
-  "webform_only": false,
-  "address": "B2B Adressenmarketing GmbH, Betrifft: Datenschutz, Im Hollerfeld 12, 35325 Mücke, Deutschland",
-  "website": "http://branchenflat.de",
-  "needs_id": false,
-  "transport": "letter",
-  "source_url": "https://www.datenanfragen.de/company/branchenflat",
-  "confirmed": false,
-  "notes": "branchenflat.de blockiert automatisierten Abruf (robots.txt). Keine E-Mail bekannt, nur Postweg."
- },
- {
   "id": "da-adressmonster",
   "name": "B2B Monster UG haftungsbeschränkt",
   "category": "Firmen- und Kontaktdatenbank",
@@ -773,16 +750,16 @@
    "all"
   ],
   "lang": "en",
-  "email": null,
-  "webform": null,
+  "email": "data@bookyourdata.com",
+  "webform": "https://optout.bookyourdata.com/",
   "webform_only": false,
-  "address": "unbekannt (nicht verifiziert)",
+  "address": "A Direct Marketing Inc. (Bookyourdata), 1348 Florida Ave. NW, Washington, DC 20009, USA",
   "website": "https://www.bookyourdata.com",
   "needs_id": false,
-  "transport": "letter",
-  "source_url": "https://blog.incogni.com/data-brokers-incogni-covers/",
-  "confirmed": false,
-  "notes": "US-B2B-Listenanbieter. bookyourdata.com lieferte bei jedem Abruf einen Fehler; Datenschutzerklärung konnte nicht gelesen werden. Eigener Hilfe-Artikel (intercom.help/bookyourdata) sagt nur, es gebe ein 'privacy request portal' und eine Suppression-Liste, ohne E-Mail. Drittquellen nennen data@bookyourdata.com (DeleteMe) bzw. mark@bookyourdata.com (offlist.me) – nicht verifiziert, daher null."
+  "transport": "email",
+  "source_url": "https://optout.bookyourdata.com/",
+  "confirmed": "2026-11-05",
+  "notes": "US-B2B-Listenanbieter. bookyourdata.com lieferte bei jedem Abruf einen Fehler; Datenschutzerklärung konnte nicht gelesen werden. Eigener Hilfe-Artikel (intercom.help/bookyourdata) sagt nur, es gebe ein 'privacy request portal' und eine Suppression-Liste, ohne E-Mail. Drittquellen nennen data@bookyourdata.com (DeleteMe) bzw. mark@bookyourdata.com (offlist.me) – nicht verifiziert, daher null. Betreiber: A Direct Marketing Inc. (Kalifornisches Datenhändler-Register Nr. 538157)."
  },
  {
   "id": "da-callcredit-gb",
@@ -1555,16 +1532,16 @@
    "de"
   ],
   "lang": "de",
-  "email": null,
+  "email": "datenschutz@postadress.de",
   "webform": null,
   "webform_only": false,
   "address": "Deutsche Post Adress GmbH & Co. KG, Am Anger 33, 33332 Gütersloh, Deutschland",
   "website": "https://www.deutschepost.de/de/p/postadress.html",
   "needs_id": false,
-  "transport": "letter",
+  "transport": "email",
   "source_url": "https://www.deutschepost.de/de/p/postadress/datenschutz.html",
-  "confirmed": true,
-  "notes": "Laut eigener Datenschutzseite nur per Post mit unterschriebenem Formular. datenschutz@postadress.de ist die DSB-Adresse (Carsten Welp). Achtung: Seite sagt, Anfragen per E-Mail/Telefon würden mangels Identitätsprüfung nicht beantwortet; Selbstauskunft nur per unterschriebenem Formular auf dem Postweg (form_only=true meint hier Papierformular). Rechtlich fragwürdig, aber zu erwarten."
+  "confirmed": "2026-11-05",
+  "notes": "Laut eigener Datenschutzseite nur per Post mit unterschriebenem Formular. datenschutz@postadress.de ist die DSB-Adresse (Carsten Welp). Achtung: Seite sagt, Anfragen per E-Mail/Telefon würden mangels Identitätsprüfung nicht beantwortet; Selbstauskunft nur per unterschriebenem Formular auf dem Postweg (form_only=true meint hier Papierformular). Rechtlich fragwürdig, aber zu erwarten. Datenschutzbeauftragter laut deutschepost.de/postadress. Für die Selbstauskunft verlangt die Firma zusätzlich ein unterschriebenes Formular per Post."
  },
  {
   "id": "da-deutsche-post-direkt",
@@ -2480,16 +2457,16 @@
    "all"
   ],
   "lang": "en",
-  "email": null,
+  "email": "privacy@intentmacro.com",
   "webform": null,
   "webform_only": false,
-  "address": "IntentMacro, Inc., 316 California Ave #41, Reno, NV 89509, USA",
+  "address": "IntentMacro, Inc., Attn: Paul Hong, COO, 316 California Ave #41, Reno, NV 89509, USA",
   "website": "https://intentmacro.com",
   "needs_id": false,
-  "transport": "letter",
+  "transport": "email",
   "source_url": "https://intentmacro.com/privacy-policy/",
-  "confirmed": false,
-  "notes": "B2B-Lead-Generierung/Intent-Daten. Policy (Stand 05.03.2024) erwähnt EWR/UK-Rechte und DPF, nennt drei E-Mail-Kontakte (Datenschutz, Kalifornien, CCPA), die aber durch ein Script verschleiert sind und sich nicht auslesen ließen (kein dekodierbarer Link). Daher E-Mail null – ggf. Brief an die Postadresse. Daten: Name, Geburtsdatum, Kontaktdaten, Jobtitel, LinkedIn-Profil, IP/Standort, Engagement-Signale."
+  "confirmed": "2026-11-05",
+  "notes": "B2B-Lead-Generierung/Intent-Daten. Policy (Stand 05.03.2024) erwähnt EWR/UK-Rechte und DPF, nennt drei E-Mail-Kontakte (Datenschutz, Kalifornien, CCPA), die aber durch ein Script verschleiert sind und sich nicht auslesen ließen (kein dekodierbarer Link). Daher E-Mail null – ggf. Brief an die Postadresse. Daten: Name, Geburtsdatum, Kontaktdaten, Jobtitel, LinkedIn-Profil, IP/Standort, Engagement-Signale. Adresse laut Datenschutzerklärung (Stand März 2024), E-Mail laut kalifornischem Datenhändler-Register."
  },
  {
   "id": "rs-ch-intrum-schweiz",
