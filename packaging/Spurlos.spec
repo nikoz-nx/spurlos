@@ -42,6 +42,8 @@ app = BUNDLE(
         "LSMinimumSystemVersion": "12.0",
         "LSApplicationCategoryType": "public.app-category.utilities",
         "NSHighResolutionCapable": True,
+        "LSAppNapIsDisabled": True,
+        "NSLocalNetworkUsageDescription": "Nur nötig, wenn dein Mailserver im eigenen Netzwerk steht.",
         "NSHumanReadableCopyright": "Freie Software unter der GNU GPL v3",
     },
 )

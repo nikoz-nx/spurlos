@@ -66,25 +66,52 @@ def storage_name() -> str:
     return "Datei (nur für Tests)" if _use_fallback() else "Schlüsselbund"
 
 
+# Einmal gelesene Werte bleiben im Speicher. Sonst fragt der Schlüsselbund jede Minute
+# neu, wenn jemand bei der Rückfrage nur „Erlauben“ statt „Immer erlauben“ klickt.
+_CACHE: dict = {}
+# Letzter Fehler beim Zugriff auf den Schlüsselbund (None = alles gut). Zeigt die Oberfläche an.
+LAST_ERROR = {"text": None}
+
+KEYCHAIN_HINT = ("Spurlos darf nicht auf den Schlüsselbund zugreifen. Öffne die Schlüsselbundverwaltung, "
+                 "such den Eintrag „Spurlos“ und erlaube Spurlos den Zugriff, oder trag das Passwort "
+                 "in den Einstellungen neu ein.")
+
+
 def set_secret(name: str, value: str) -> None:
     if _use_fallback():
         data = _read_fallback()
         data[name] = value
         _write_fallback(data)
+        _CACHE[name] = value
         return
-    keyring.set_password(SERVICE, name, value)
+    try:
+        keyring.set_password(SERVICE, name, value)
+    except Exception as exc:  # noqa: BLE001  (KeyringLocked, PasswordSetError …)
+        raise ValueError("Das Passwort konnte nicht im Schlüsselbund gespeichert werden (%s). "
+                         "Entsperre den Schlüsselbund „Anmeldung“ und versuch es noch einmal." % str(exc)[:120])
+    _CACHE[name] = value
+    LAST_ERROR["text"] = None
 
 
 def get_secret(name: str) -> str | None:
+    if name in _CACHE:
+        return _CACHE[name]
     if _use_fallback():
-        return _read_fallback().get(name)
-    try:
-        return keyring.get_password(SERVICE, name)
-    except KeyringError:
-        return None
+        value = _read_fallback().get(name)
+    else:
+        try:
+            value = keyring.get_password(SERVICE, name)
+            LAST_ERROR["text"] = None
+        except Exception as exc:  # noqa: BLE001
+            LAST_ERROR["text"] = KEYCHAIN_HINT + " (%s)" % str(exc)[:80]
+            return None
+    if value:
+        _CACHE[name] = value
+    return value
 
 
 def delete_secret(name: str) -> None:
+    _CACHE.pop(name, None)
     if _use_fallback():
         data = _read_fallback()
         data.pop(name, None)

@@ -1088,10 +1088,11 @@
       var a = document.createElement('a');
       var d = new Date();
       a.href = URL.createObjectURL(blob);
-      a.download = 'spurlos-sicherung-' + d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()) + '.json';
+      // Uhrzeit im Namen: im Programmfenster scheitert das Speichern still, wenn die Datei schon existiert
+      a.download = 'spurlos-sicherung-' + d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()) + '-' + pad(d.getHours()) + pad(d.getMinutes()) + '.json';
       document.body.appendChild(a); a.click(); a.remove();
       setTimeout(function () { URL.revokeObjectURL(a.href); }, 5000);
-      toast('Sicherung gespeichert (Ordner „Downloads“)');
+      toast(window.pywebview ? 'Wähle im Dialog, wo die Sicherung liegen soll.' : 'Sicherung gespeichert (Ordner „Downloads“)');
     }).catch(fail).then(function () { busy(el, false); });
   };
   ACT.reset = function () {
@@ -1117,7 +1118,15 @@
       if (retry) setTimeout(function () { boot(attempt + 1); }, 3000);
     });
   }
-  ACT.reload = function () { location.reload(); };
+  ACT.reload = function () {
+    // Im Programmfenster: über die App neu laden, damit der Zugangs-Link wieder gesetzt wird
+    if (window.pywebview && window.pywebview.api && window.pywebview.api.restart) window.pywebview.api.restart();
+    else location.reload();
+  };
+  // Fenster war im Hintergrund (Timer gedrosselt): beim Zurückholen sofort auffrischen
+  document.addEventListener('visibilitychange', function () {
+    if (document.visibilityState === 'visible' && S.boot && S.boot.setup_done) refreshData().then(render).catch(function () {});
+  });
   boot(0);
   setInterval(function () {
     if (!S.boot || !S.boot.setup_done) return;

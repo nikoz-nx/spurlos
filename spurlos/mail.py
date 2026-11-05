@@ -22,7 +22,47 @@ from html.parser import HTMLParser
 # nach seinem Netzwerknamen: Das löst auf dem Mac die Frage nach „Geräten in lokalen
 # Netzwerken“ aus und schickt den Gerätenamen (oft mit dem Vornamen) an den Mailserver.
 HELO_NAME = "[127.0.0.1]"   # gültige Form nach RFC 5321, verrät nichts über den Mac
-TIMEOUT = 30
+TIMEOUT = 30          # Lesen/Schreiben
+CONNECT_TIMEOUT = 10  # je Adresse: Macs probieren IPv6 zuerst, auch wenn es nicht funktioniert
+
+
+def _connect(host: str, port: int) -> socket.socket:
+    """Wie socket.create_connection, aber mit kurzem Timeout pro Adresse (IPv6 ohne Route)."""
+    last = None
+    try:
+        infos = socket.getaddrinfo(host, port, 0, socket.SOCK_STREAM)
+    except socket.gaierror as exc:
+        raise MailUnreachable("Der Server %s wurde nicht gefunden – besteht eine Internetverbindung? (%s)" % (host, exc)) from exc
+    # IPv4 zuerst: funktioniert praktisch immer; IPv6 danach
+    infos.sort(key=lambda i: 0 if i[0] == socket.AF_INET else 1)
+    for family, kind, proto, _name, addr in infos:
+        sock = None
+        try:
+            sock = socket.socket(family, kind, proto)
+            sock.settimeout(CONNECT_TIMEOUT)
+            sock.connect(addr)
+            sock.settimeout(TIMEOUT)
+            return sock
+        except OSError as exc:
+            last = exc
+            if sock is not None:
+                sock.close()
+    raise MailUnreachable("Der Server %s ist nicht erreichbar (%s)." % (host, last))
+
+
+class _SMTP(smtplib.SMTP):
+    def _get_socket(self, host, port, timeout):
+        return _connect(host, port)
+
+
+class _SMTP_SSL(smtplib.SMTP_SSL):
+    def _get_socket(self, host, port, timeout):
+        return self.context.wrap_socket(_connect(host, port), server_hostname=self._host)
+
+
+class _IMAP4_SSL(imaplib.IMAP4_SSL):
+    def _create_socket(self, timeout):
+        return self.ssl_context.wrap_socket(_connect(self.host, self.port), server_hostname=self.host)
 MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
 
 PROVIDERS = {
@@ -56,6 +96,11 @@ DOMAIN_TO_PROVIDER = {
 
 
 class MailError(Exception):
+    pass
+
+
+class MailUnreachable(MailError):
+    """Kein Netz oder Server nicht erreichbar – vorübergehend, kein Passwort-Problem."""
     """Fehler mit verständlicher Meldung für die Oberfläche."""
 
 
@@ -153,9 +198,11 @@ def connect_imap(cfg: dict, password: str) -> imaplib.IMAP4_SSL:
     if not host:
         raise MailError("Es fehlt der Posteingangsserver (IMAP).")
     try:
-        imap = imaplib.IMAP4_SSL(host, int(cfg.get("imap_port") or 993), ssl_context=_ctx(), timeout=TIMEOUT)
+        imap = _IMAP4_SSL(host, int(cfg.get("imap_port") or 993), ssl_context=_ctx(), timeout=TIMEOUT)
+    except MailUnreachable:
+        raise
     except (socket.gaierror, OSError) as exc:
-        raise MailError("Der Posteingangsserver %s ist nicht erreichbar (%s)." % (host, exc)) from exc
+        raise MailUnreachable("Der Posteingangsserver %s ist nicht erreichbar (%s)." % (host, exc)) from exc
     last = None
     for name in _login_names(cfg):
         try:
@@ -182,13 +229,17 @@ def connect_smtp(cfg: dict, password: str) -> smtplib.SMTP:
     port = int(cfg.get("smtp_port") or 587)
     try:
         if cfg.get("smtp_security") == "ssl" or port == 465:
-            smtp = smtplib.SMTP_SSL(host, port, context=_ctx(), timeout=TIMEOUT, local_hostname=HELO_NAME)
+            smtp = _SMTP_SSL(host, port, context=_ctx(), timeout=TIMEOUT, local_hostname=HELO_NAME)
         else:
-            smtp = smtplib.SMTP(host, port, timeout=TIMEOUT, local_hostname=HELO_NAME)
+            smtp = _SMTP(host, port, timeout=TIMEOUT, local_hostname=HELO_NAME)
             smtp.ehlo()
             smtp.starttls(context=_ctx())
             smtp.ehlo()
-    except (socket.gaierror, OSError, smtplib.SMTPException) as exc:
+    except MailUnreachable:
+        raise
+    except (socket.gaierror, OSError) as exc:
+        raise MailUnreachable("Der Postausgangsserver %s ist nicht erreichbar (%s)." % (host, exc)) from exc
+    except smtplib.SMTPException as exc:
         raise MailError("Der Postausgangsserver %s ist nicht erreichbar (%s)." % (host, exc)) from exc
     last = None
     for name in _login_names(cfg):
@@ -246,6 +297,9 @@ def send(cfg: dict, password: str, to: str, subject: str, body: str, in_reply_to
         raise MailError("Der Server hat die Empfängeradresse %s abgelehnt." % to) from exc
     except smtplib.SMTPException as exc:
         raise MailError("Versand fehlgeschlagen: %s" % _short(exc)) from exc
+    except OSError as exc:
+        # Verbindung mittendrin weg (z. B. Mac schläft ein): nicht gleich noch mal, sonst geht die Mail doppelt raus
+        raise MailError("Versand abgebrochen, Verbindung verloren: %s" % _short(exc)) from exc
     finally:
         try:
             smtp.quit()

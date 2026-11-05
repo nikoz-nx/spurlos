@@ -297,6 +297,14 @@ def _fm_helper():
     Terminal-Fassung: liegt neben Python in .venv/bin (legt das Installationsprogramm an).
     Mac-App: liegt in Spurlos.app/Contents/MacOS neben dem Programm.
     """
+    if sys.platform == "darwin":
+        import platform
+        try:
+            major = int((platform.mac_ver()[0] or "0").split(".")[0])
+        except ValueError:
+            major = 0
+        if major < 26 or platform.machine() != "arm64":
+            return None   # Hilfsprogramm würde auf älteren Macs nur abstürzen (fehlendes Framework)
     for folder in (Path(sys.executable).parent, Path(getattr(sys, "_MEIPASS", "") or sys.executable).parent):
         path = folder / "spurlos-fm"
         if path.exists() and os.access(str(path), os.X_OK):
@@ -364,13 +372,17 @@ def _ask_apple(prompt: str) -> str:
 def _post_json(url: str, payload: dict, headers: dict, timeout: int = 60) -> dict:
     req = urllib.request.Request(url, data=json.dumps(payload).encode("utf-8"),
                                  headers=dict({"Content-Type": "application/json"}, **headers), method="POST")
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
+    with _LOCAL_OPENER.open(req, timeout=timeout) as resp:
         return json.loads(resp.read().decode("utf-8"))
+
+
+# Ollama läuft auf diesem Mac: nie über den System-Proxy
+_LOCAL_OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 
 
 def ollama_models(base_url: str) -> list:
     req = urllib.request.Request(base_url.rstrip("/") + "/api/tags")
-    with urllib.request.urlopen(req, timeout=5) as resp:
+    with _LOCAL_OPENER.open(req, timeout=5) as resp:
         data = json.loads(resp.read().decode("utf-8"))
     return [m.get("name") for m in data.get("models", []) if m.get("name")]
 

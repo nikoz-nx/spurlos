@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import re
+import os
 import subprocess
 import sys
 import threading
@@ -50,9 +51,12 @@ def notify(text: str) -> None:
         return
     if sys.platform != "darwin":
         return
-    safe = text.replace('"', "'")[:180]
+    # Text als Argument übergeben, nicht ins Skript einsetzen: Firmennamen sind Fremddaten.
+    # LANG setzen, sonst kommen Umlaute aus einer per Finder gestarteten App kaputt an.
+    env = dict(os.environ, LANG="de_DE.UTF-8", LC_ALL="de_DE.UTF-8")
+    script = ["-e", "on run argv", "-e", 'display notification (item 1 of argv) with title "Spurlos"', "-e", "end run"]
     try:
-        subprocess.Popen(["osascript", "-e", 'display notification "%s" with title "Spurlos"' % safe])
+        subprocess.run(["osascript"] + script + [text[:180]], env=env, timeout=10, capture_output=True)
     except Exception:  # noqa: BLE001
         pass
 
@@ -292,6 +296,8 @@ def send_due(force: bool = False) -> dict:
                         "ORDER BY planned_for, id LIMIT ?", (now_s, quota))
     sent, errors = 0, []
     for r in rows:
+        if STOP.is_set():
+            break   # Programm wird beendet: keine neue Mail mehr anfangen
         try:
             send_request(r["ref"])
             sent += 1
@@ -299,6 +305,10 @@ def send_due(force: bool = False) -> dict:
         except mail.MailError as exc:
             errors.append("%s: %s" % (r["ref"], exc))
             text = str(exc)
+            if isinstance(exc, mail.MailUnreachable):
+                # Kein Netz (z. B. gerade aus dem Ruhezustand aufgewacht): kurz warten, nicht hochzählen.
+                db.put("send_pause_until", _iso(datetime.now() + timedelta(minutes=3)))
+                break
             if "Anmeldung" in text or "erreichbar" in text:
                 # Server oder Passwort: nicht jede Minute neu probieren, sonst sperrt der Anbieter das Konto.
                 fails = int(db.get("send_failures") or 0) + 1
@@ -459,7 +469,10 @@ def process_incoming(msg: dict) -> str | None:
 def poll() -> dict:
     cfg, pw = mailbox_ready()
     if not cfg:
-        return {"ok": False, "error": "Postfach nicht eingerichtet"}
+        err = secrets_store.LAST_ERROR["text"] or "Postfach nicht eingerichtet"
+        if db.get("mailbox").get("password_saved"):
+            db.put("last_poll_error", err)
+        return {"ok": False, "error": err}
     first = db.query_one("SELECT MIN(date) AS d FROM messages WHERE direction = 'out'")
     since = None
     if first and first["d"]:
@@ -471,7 +484,7 @@ def poll() -> dict:
         messages, state = mail.fetch_new(cfg, pw, db.get("imap_state"), since)
     except mail.MailError as exc:
         db.put("last_poll_error", str(exc))
-        return {"ok": False, "error": str(exc)}
+        return {"ok": False, "error": str(exc), "unreachable": isinstance(exc, mail.MailUnreachable)}
     except Exception as exc:  # noqa: BLE001
         db.put("last_poll_error", "Abruf fehlgeschlagen: %s" % exc)
         return {"ok": False, "error": "Abruf fehlgeschlagen: %s" % exc}
@@ -698,13 +711,18 @@ def complaint(ref: str) -> dict:
 
 # ----------------------------------------------------------------------------- Hintergrund
 
+STOP = threading.Event()   # wird beim Beenden gesetzt: laufende Etappe nach der aktuellen Mail abbrechen
+
+
 class Scheduler(threading.Thread):
     def __init__(self):
         super().__init__(daemon=True, name="spurlos-scheduler")
-        self.stop_event = threading.Event()
+        self.stop_event = STOP
         self.last_poll = 0.0
         self.last_deadline = 0.0
         self.poll_failures = 0
+        self._updating = False
+        STOP.clear()
 
     def run(self):
         time.sleep(5)
@@ -726,20 +744,34 @@ class Scheduler(threading.Thread):
                 wait = min(4 * 3600, wait * 2 ** self.poll_failures)   # bei Fehlern seltener versuchen
             if now - self.last_poll >= wait:
                 result = poll()
-                self.poll_failures = 0 if result.get("ok") else self.poll_failures + 1
-                self.last_poll = now
+                if result.get("ok"):
+                    self.poll_failures = 0
+                elif result.get("unreachable"):
+                    self.last_poll = now - wait + 180   # kein Netz: in 3 Minuten noch einmal
+                else:
+                    self.poll_failures += 1
+                    self.last_poll = now
+                if result.get("ok"):
+                    self.last_poll = now
             send_due()
             if now - self.last_deadline >= 3600:
                 check_deadlines()
                 self.last_deadline = now
-            last = _parse(db.get("last_broker_update"))
-            if last is None or datetime.now() - last > timedelta(days=7):
-                try:
-                    info = brokers.update_all()
-                    if info.get("incogni", {}).get("added"):
-                        notify("Neue Firmen auf der Händlerliste")
-                except Exception:  # noqa: BLE001
-                    pass
+        last = _parse(db.get("last_broker_update"))
+        if (last is None or datetime.now() - last > timedelta(days=7)) and not self._updating:
+            # Download der Firmenlisten (bis zu 90 s) läuft im eigenen Thread, damit die Oberfläche nicht hängt.
+            self._updating = True
+            threading.Thread(target=self._update_brokers, name="spurlos-brokers", daemon=True).start()
+
+    def _update_brokers(self):
+        try:
+            info = brokers.update_all()
+            if info.get("incogni", {}).get("added"):
+                notify("Neue Firmen auf der Händlerliste")
+        except Exception:  # noqa: BLE001
+            pass
+        finally:
+            self._updating = False
 
 
 def run_locked(fn, *args, **kwargs):

@@ -421,8 +421,10 @@ def create_app() -> Flask:
         mb = db.get("mailbox")
         return ok(counts=counts, total=total, sent=sent, replies=replies, outcomes=outcomes, todos=todos, plan=plan,
                   activity=activity, inbox=inbox, started=db.get("started"),
-                  mailbox={"address": mb.get("address"), "ok": not db.get("last_poll_error"),
-                           "error": db.get("last_poll_error"), "send_error": db.get("last_send_error"),
+                  mailbox={"address": mb.get("address"),
+                           "ok": not (db.get("last_poll_error") or secrets_store.LAST_ERROR["text"]),
+                           "error": secrets_store.LAST_ERROR["text"] or db.get("last_poll_error"),
+                           "send_error": db.get("last_send_error"),
                            "last_poll": db.get("last_poll")},
                   ai=db.get("ai").get("provider"))
 

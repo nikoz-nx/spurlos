@@ -55,7 +55,9 @@ def existing_instance(wait_seconds: int = 30):
         if path.exists():
             try:
                 info = json.loads(path.read_text(encoding="utf-8"))
-                urllib.request.urlopen("http://127.0.0.1:%d/static/app.css" % info["port"], timeout=2)
+                # Ohne System-Proxy: Firmen-Macs leiten sonst auch 127.0.0.1 über den Proxy
+                opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+                opener.open("http://127.0.0.1:%d/static/app.css" % info["port"], timeout=2)
                 return info
             except Exception:  # noqa: BLE001
                 pass

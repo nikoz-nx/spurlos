@@ -37,7 +37,7 @@ jobs:
         continue-on-error: true
         run: |
           mkdir -p build-helper
-          xcrun swiftc -O -parse-as-library spurlos/helpers/spurlos_fm.swift -o build-helper/spurlos-fm
+          xcrun swiftc -O -parse-as-library -target arm64-apple-macos26 spurlos/helpers/spurlos_fm.swift -o build-helper/spurlos-fm
 
       - name: App bauen
         run: python -m PyInstaller --noconfirm --clean packaging/Spurlos.spec
@@ -52,7 +52,7 @@ jobs:
           P12_PASSWORD: ${{ secrets.SPURLOS_SIGN_P12_PASSWORD }}
         run: |
           if [ -z "$P12_BASE64" ]; then
-            echo "Kein Zertifikat hinterlegt – Ad-hoc-Signatur."
+            echo "::warning::Kein Signatur-Zertifikat hinterlegt (SPURLOS_SIGN_P12). Ad-hoc-Signatur: der Schlüsselbund fragt nach jedem Update neu."
             echo "identity=-" >> "$GITHUB_OUTPUT"
             exit 0
           fi
@@ -87,6 +87,14 @@ jobs:
         env:
           SPURLOS_SELFTEST_NET: "1"
         run: dist/Spurlos.app/Contents/MacOS/Spurlos --selftest
+
+      - name: Mindest-macOS der fertigen App ausgeben
+        run: |
+          echo "Hauptprogramm:"; vtool -show-build dist/Spurlos.app/Contents/MacOS/Spurlos | grep -E "minos|platform" || true
+          echo "Höchstes minos in Frameworks/Bibliotheken:"
+          find dist/Spurlos.app -type f \( -name "*.dylib" -o -name "*.so" -o -path "*/Versions/*/Python*" \) -print0 2>/dev/null \
+            | xargs -0 -n1 vtool -show-build 2>/dev/null | awk '/minos/ {print $2}' | sort -V | tail -1
+          echo "Info.plist LSMinimumSystemVersion: $(/usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' dist/Spurlos.app/Contents/Info.plist)"
 
       - name: DMG erstellen
         run: |
