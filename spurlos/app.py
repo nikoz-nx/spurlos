@@ -435,7 +435,15 @@ def create_app() -> Flask:
         for a in activity:
             a.update(_status_view({"status": a["status"] or "planned", "label": a["label"], "outcome": a["outcome"]}))
         mb = db.get("mailbox")
-        return ok(counts=counts, total=total, sent=sent, replies=replies, outcomes=outcomes, todos=todos, plan=plan, eta_days=eta,
+        today = db.now()[:10]
+        today_stats = {
+            "sent": db.query_one("SELECT COUNT(*) AS n FROM messages WHERE direction = 'out' AND kind = 'request' AND substr(date, 1, 10) = ?", (today,))["n"],
+            "reminders": db.query_one("SELECT COUNT(*) AS n FROM messages WHERE direction = 'out' AND kind != 'request' AND substr(date, 1, 10) = ?", (today,))["n"],
+            "replies": db.query_one("SELECT COUNT(*) AS n FROM messages WHERE direction = 'in' AND kind = 'reply' AND substr(COALESCE(received, date), 1, 10) = ?", (today,))["n"],
+            "planned": db.query_one("SELECT COUNT(*) AS n FROM requests WHERE status = 'planned' AND substr(planned_for, 1, 10) = ?", (today,))["n"],
+            "next": (nxt or {}).get("p"),
+        }
+        return ok(counts=counts, total=total, sent=sent, replies=replies, outcomes=outcomes, todos=todos, plan=plan, eta_days=eta, today=today_stats,
                   busy=engine.BUSY["what"],
                   activity=activity, inbox=inbox, started=db.get("started"),
                   mailbox={"address": mb.get("address"),

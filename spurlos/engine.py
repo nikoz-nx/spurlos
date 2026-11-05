@@ -379,7 +379,8 @@ def send_due(force: bool = False) -> dict:
         return {"sent": 0, "paused": True}
     quota = daily_cap(_send_days_so_far()) - sent_count_today()
     if quota <= 0:
-        return {"sent": 0}
+        nxt = db.query_one("SELECT MIN(planned_for) AS p FROM requests WHERE status = 'planned'")
+        return {"sent": 0, "errors": [], "names": [], "left_today": 0, "next": nxt["p"] if nxt else None, "quota_left": 0}
     now_s = db.now()
     if force:
         # „Jetzt senden“: was heute noch vertretbar ist, sofort statt verteilt.
@@ -388,13 +389,15 @@ def send_due(force: bool = False) -> dict:
     else:
         rows = db.query("SELECT ref FROM requests WHERE status = 'planned' AND planned_for IS NOT NULL AND planned_for <= ? "
                         "ORDER BY planned_for, id LIMIT ?", (now_s, quota))
-    sent, errors = 0, []
+    sent, errors, names = 0, [], []
     for r in rows:
         if STOP.is_set():
             break   # Programm wird beendet: keine neue Mail mehr anfangen
         try:
             send_request(r["ref"])
             sent += 1
+            row = db.query_one("SELECT b.name FROM requests r JOIN brokers b ON b.id = r.broker_id WHERE r.ref = ?", (r["ref"],))
+            names.append(row["name"] if row else r["ref"])
             time.sleep(2)
         except mail.MailError as exc:
             errors.append("%s: %s" % (r["ref"], exc))
@@ -427,7 +430,11 @@ def send_due(force: bool = False) -> dict:
         plan_batches(False)
     if sent:
         notify("%d Anfragen verschickt" % sent)
-    return {"sent": sent, "errors": errors}
+    left_today = db.query_one("SELECT COUNT(*) AS n FROM requests WHERE status = 'planned' AND substr(planned_for, 1, 10) = ?",
+                              (date.today().isoformat(),))["n"]
+    nxt = db.query_one("SELECT MIN(planned_for) AS p FROM requests WHERE status = 'planned'")
+    return {"sent": sent, "errors": errors, "names": names, "left_today": left_today, "next": nxt["p"] if nxt else None,
+            "quota_left": max(0, quota - sent)}
 
 
 # ----------------------------------------------------------------------------- Eingang

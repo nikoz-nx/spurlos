@@ -56,6 +56,7 @@
     return isNaN(d) ? null : d;
   }
   function pad(n) { return (n < 10 ? '0' : '') + n; }
+  function fmtWhenIn(s) { return fmtWhen(s).replace(/^(Heute|Morgen|Gestern)/, function (m) { return m.toLowerCase(); }); }
   function fmtWhen(s, noTime) {
     var d = parseDate(s);
     if (!d) return esc(s || '');
@@ -316,9 +317,18 @@
         (a.ref ? '<span class="mono tiny muted">' + esc(a.ref) + '</span>' : '') + (a.status ? pill(a.group, a.label) : '') + '</li>';
     }).join('') || '<li><span class="muted small">Noch keine Aktivität.</span></li>';
     var today = new Date().toLocaleDateString('de-DE', { weekday: 'long', day: 'numeric', month: 'long' });
+    var t = o.today || {};
+    var todayBits = [];
+    if (t.sent) todayBits.push(t.sent + (t.sent === 1 ? ' Anfrage verschickt' : ' Anfragen verschickt'));
+    if (t.reminders) todayBits.push(t.reminders + (t.reminders === 1 ? ' Erinnerung' : ' Erinnerungen') + ' verschickt');
+    if (t.replies) todayBits.push(t.replies + (t.replies === 1 ? ' Antwort' : ' Antworten') + ' bekommen');
+    var todayLine = '<section class="card today"><div class="row wrap between"><div class="row wrap" style="gap:6px 14px"><b>Heute</b>' +
+      (todayBits.length ? todayBits.map(function (b) { return '<span>' + I.ok + ' ' + esc(b) + '</span>'; }).join('') : '<span class="muted">noch nichts verschickt</span>') + '</div>' +
+      '<span class="small muted">' + (t.planned ? t.planned + ' weitere ' + (t.planned === 1 ? 'geht' : 'gehen') + ' heute noch raus' + (t.next ? ', die nächste ' + fmtWhenIn(t.next) : '') :
+        (t.next ? 'Weiter geht es ' + fmtWhenIn(t.next) : (c.planned ? '' : 'Alle Anfragen sind verschickt'))) + '</span></div></section>';
     return head(esc(today) + (o.mailbox && o.mailbox.last_poll ? ' · zuletzt abgerufen ' + fmtWhen(o.mailbox.last_poll) : ''), 'Übersicht',
       '<button class="btn" data-act="poll">' + I.refresh + '<span>Postfach abrufen</span></button><a class="btn p" href="#/anfragen">Alle Anfragen</a>') +
-      errors +
+      errors + todayLine +
       '<section class="card"><div class="row wrap between" style="align-items:flex-end"><div class="stack" style="gap:4px"><h2>Fortschritt</h2><p class="small muted" style="margin:0">' +
       o.sent + ' von ' + total + ' Firmen angeschrieben · ' + done + ' abgeschlossen</p></div><div class="row" style="align-items:baseline;gap:6px"><span class="mono" style="font-size:32px;font-weight:500">' + pct + '<span style="font-size:20px">%</span></span><span class="small muted">abgeschlossen</span>' + tipBtn(DONE_TIP, 'end', 'Was heißt abgeschlossen?') + '</div></div>' +
       '<div class="bar" role="img" aria-label="Verteilung der Anfragen">' + bar + '</div><div class="legend">' + legend + '</div></section>' +
@@ -590,7 +600,15 @@
   ACT['send-batch'] = function (el) {
     busy(el, true);
     api('/api/send', { body: {} }).then(function (d) {
-      toast(d.sent ? d.sent + ' Anfragen gesendet' : (d.errors && d.errors.length ? d.errors[0] : 'Für heute ist alles verschickt'), !d.sent && d.errors && d.errors.length);
+      var ok = d.sent > 0, errs = (d.errors || []);
+      var title = ok ? d.sent + (d.sent === 1 ? ' Anfrage verschickt' : ' Anfragen verschickt') : (errs.length ? 'Versand fehlgeschlagen' : 'Für heute ist alles verschickt');
+      var body = '';
+      if (ok) body += '<ul class="plain">' + d.names.map(function (n) { return '<li>' + I.ok + ' ' + esc(n) + '</li>'; }).join('') + '</ul>';
+      if (errs.length) body += '<div class="notice bad">' + I.warn + '<span>' + esc(errs[0]) + (errs.length > 1 ? ' (und ' + (errs.length - 1) + ' weitere)' : '') + '</span></div>';
+      if (!ok && !errs.length) body += '<p class="muted" style="margin:0">Spurlos hat die Menge für heute schon verschickt. Mehr am Tag wäre riskant, dann landen die Anfragen im Spam.</p>';
+      if (d.next) body += '<p class="small muted" style="margin:0">Die nächste Anfrage geht automatisch ' + fmtWhen(d.next) + ' raus.</p>';
+      openModal('<div class="row between"><h2>' + (ok ? I.ok + ' ' : '') + esc(title) + '</h2><button class="btn sm" data-act="close-modal">Schließen</button></div>' + body +
+        '<div class="row"><button class="btn p" data-act="close-modal">Alles klar</button></div>');
       return refreshData();
     }).then(render).catch(fail).then(function () { busy(el, false); });
   };
