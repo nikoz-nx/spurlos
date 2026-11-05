@@ -1,0 +1,25 @@
+{
+ "ids": [
+  "da-bfs-health-finance",
+  "da-bisnode-de",
+  "da-csob",
+  "da-dastelefonbuch",
+  "da-datarade",
+  "da-meinestadt-de",
+  "da-mmf-ug",
+  "da-optilyz",
+  "da-sales-rocks-bv",
+  "da-uniserv",
+  "da-universum-business",
+  "inc-arkeero",
+  "inc-ermes",
+  "inc-fetcher"
+ ],
+ "incogni_alias": {
+  "apollo": "da-apollo-io",
+  "comscore": "rs-comscore-scorecardresearch",
+  "id5": "rs-id5",
+  "liveintent": "rs-liveintent",
+  "freewheel": "rs-freewheel-comcast"
+ }
+}
