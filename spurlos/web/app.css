@@ -194,6 +194,7 @@ textarea.input { height: auto; min-height: 120px; padding: 10px 12px; line-heigh
 .tip strong { display: block; color: #fff; margin-bottom: 4px; }
 .tipw:hover .tip, .tipw:focus-within .tip { visibility: visible; opacity: 1; }
 .tip.start { left: -6px; transform: none; }
+.tip.end { left: auto; right: -6px; transform: none; }
 
 /* ------------------------------------------------------------ Einrichtung */
 .onb { display: flex; flex-wrap: wrap; min-height: 100vh; }

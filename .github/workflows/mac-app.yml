@@ -42,11 +42,45 @@ jobs:
       - name: App bauen
         run: python -m PyInstaller --noconfirm --clean packaging/Spurlos.spec
 
-      - name: Hilfsprogramm einfügen und signieren
+      # Feste Unterschrift: Mit immer demselben Zertifikat erkennt macOS jede neue Version
+      # als dieselbe App. Der Schlüsselbund fragt dann nur einmal, nicht nach jedem Update.
+      # Ohne die geheimen Einstellungen (z. B. bei Kopien des Projekts) wird nur ad hoc signiert.
+      - name: Zertifikat für die Unterschrift laden
+        id: cert
+        env:
+          P12_BASE64: ${{ secrets.SPURLOS_SIGN_P12 }}
+          P12_PASSWORD: ${{ secrets.SPURLOS_SIGN_P12_PASSWORD }}
         run: |
-          if [ -x build-helper/spurlos-fm ]; then cp build-helper/spurlos-fm dist/Spurlos.app/Contents/MacOS/; fi
-          codesign --force --deep --sign - dist/Spurlos.app
-          codesign --verify --deep --strict dist/Spurlos.app
+          if [ -z "$P12_BASE64" ]; then
+            echo "Kein Zertifikat hinterlegt – Ad-hoc-Signatur."
+            echo "identity=-" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          KC="$RUNNER_TEMP/spurlos-sign.keychain-db"
+          KC_PW=$(openssl rand -hex 16)
+          echo "$P12_BASE64" | base64 --decode > "$RUNNER_TEMP/sign.p12"
+          security create-keychain -p "$KC_PW" "$KC"
+          security set-keychain-settings -lut 3600 "$KC"
+          security unlock-keychain -p "$KC_PW" "$KC"
+          security import "$RUNNER_TEMP/sign.p12" -k "$KC" -P "$P12_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KC_PW" "$KC" > /dev/null
+          security list-keychains -d user -s "$KC" $(security list-keychains -d user | tr -d '"')
+          rm -f "$RUNNER_TEMP/sign.p12"
+          HASH=$(security find-certificate -c "Spurlos" -Z "$KC" | awk '/SHA-1 hash:/ {print $3; exit}')
+          echo "Zertifikat: $HASH"
+          echo "identity=$HASH" >> "$GITHUB_OUTPUT"
+
+      - name: Hilfsprogramm einfügen und signieren
+        env:
+          IDENTITY: ${{ steps.cert.outputs.identity }}
+        run: |
+          if [ -x build-helper/spurlos-fm ]; then
+            codesign --force --sign "$IDENTITY" build-helper/spurlos-fm
+            cp build-helper/spurlos-fm dist/Spurlos.app/Contents/MacOS/
+          fi
+          codesign --force --deep --sign "$IDENTITY" dist/Spurlos.app
+          codesign --verify --deep --verbose=2 dist/Spurlos.app
+          codesign --display --requirements - dist/Spurlos.app
           lipo -info dist/Spurlos.app/Contents/MacOS/Spurlos
 
       - name: Fertige App prüfen
