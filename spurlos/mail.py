@@ -18,6 +18,10 @@ from email.message import EmailMessage
 from email.utils import formataddr, getaddresses, make_msgid, parsedate_to_datetime
 from html.parser import HTMLParser
 
+# Name, mit dem sich Spurlos beim Mailserver meldet. Ohne Angabe fragt Python den Mac
+# nach seinem Netzwerknamen: Das löst auf dem Mac die Frage nach „Geräten in lokalen
+# Netzwerken“ aus und schickt den Gerätenamen (oft mit dem Vornamen) an den Mailserver.
+HELO_NAME = "[127.0.0.1]"   # gültige Form nach RFC 5321, verrät nichts über den Mac
 TIMEOUT = 30
 MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
 
@@ -178,9 +182,9 @@ def connect_smtp(cfg: dict, password: str) -> smtplib.SMTP:
     port = int(cfg.get("smtp_port") or 587)
     try:
         if cfg.get("smtp_security") == "ssl" or port == 465:
-            smtp = smtplib.SMTP_SSL(host, port, context=_ctx(), timeout=TIMEOUT)
+            smtp = smtplib.SMTP_SSL(host, port, context=_ctx(), timeout=TIMEOUT, local_hostname=HELO_NAME)
         else:
-            smtp = smtplib.SMTP(host, port, timeout=TIMEOUT)
+            smtp = smtplib.SMTP(host, port, timeout=TIMEOUT, local_hostname=HELO_NAME)
             smtp.ehlo()
             smtp.starttls(context=_ctx())
             smtp.ehlo()
