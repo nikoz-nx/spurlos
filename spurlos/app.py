@@ -405,7 +405,9 @@ def create_app() -> Flask:
                                    ("failed", "Zustellung fehlgeschlagen", "Ansehen"),
                                    ("complaint", "Beschwerde vorbereiten", "Ansehen")):
             items = [r for r in rows if r["status"] == status]
-            if status == "webform" and not mails_running:
+            if status == "webform" and items and not mails_running:
+                todos.append({"n": len(items), "title": title, "later": True, "href": "#/anfragen?f=todo", "cta": "Ansehen",
+                              "sub": "Kommt ab morgen dran, wenn die Mail-Anfragen laufen. Eins nach dem anderen."})
                 continue
             if items:
                 todos.append({"n": len(items), "title": title, "sub": ", ".join(i["broker_name"] for i in items[:4]),

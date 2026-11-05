@@ -377,7 +377,7 @@
     if (o.mailbox && o.mailbox.send_error) errors += '<div class="notice warn">' + I.warn + '<span><b>Versand:</b> ' + esc(o.mailbox.send_error) + '</span></div>';
     if (o.busy) errors += '<div class="notice"><span class="spin"></span><span>Spurlos arbeitet gerade: ' + esc(o.busy) + '. Knöpfe reagieren so lange etwas verzögert.</span></div>';
     var todos = (o.todos || []).map(function (t) {
-      return '<li><span class="num">' + t.n + '</span><div class="grow stack" style="gap:2px"><b style="font-weight:500">' + esc(t.title) + '</b><span class="small muted">' + esc(t.sub) + '</span></div>' +
+      return '<li' + (t.later ? ' style="opacity:.6"' : '') + '><span class="num"' + (t.later ? ' style="background:var(--plan-bg);color:var(--plan-fg)"' : '') + '>' + t.n + '</span><div class="grow stack" style="gap:2px"><b style="font-weight:500">' + esc(t.title) + '</b><span class="small muted">' + esc(t.sub) + '</span></div>' +
         '<a class="btn sm" href="' + esc(t.href) + '">' + esc(t.cta) + '</a></li>';
     }).join('') || '<li><span class="muted small">Gerade gibt es nichts zu tun. Spurlos meldet sich, sobald eine Antwort kommt.</span></li>';
     var plan = (o.plan || []).map(function (p) {
@@ -592,7 +592,7 @@
       return (S.ui.reqFilter === 'all' || r.group === S.ui.reqFilter) &&
         (!q || (r.broker_name + ' ' + r.ref).toLowerCase().indexOf(q) >= 0);
     });
-    var cols = 'grid-template-columns:minmax(150px,2fr) minmax(130px,1.4fr) 76px 54px 54px;min-width:560px';
+    var cols = 'grid-template-columns:minmax(150px,2fr) minmax(130px,1.4fr) 84px 72px 60px;min-width:580px';
     var list = vis.map(function (r) {
       var overdue = r.group === 'overdue';
       return '<div class="trow click ' + (r.ref === S.ui.reqSel ? 'sel' : '') + '" style="' + cols + '" data-act="req-sel" data-ref="' + esc(r.ref) + '"><div class="stack" style="gap:2px;min-width:0"><button class="name" data-act="req-sel" data-ref="' + esc(r.ref) + '">' + esc(r.broker_name) + '</button><span class="tiny muted"><span class="mono">' + esc(r.ref) + '</span> · ' + esc(r.category || groupLabel(r.grp)) + '</span></div>' +
@@ -639,7 +639,7 @@
       (b.what ? '<span class="small muted">' + esc(b.what) + '</span>' : '') + '</div>' +
       '<dl style="margin:0;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px 16px">' +
       dl('Art', esc(b.category || groupLabel(b.grp))) + dl('Sprache', langLabel(b.lang)) +
-      (r.sent_at ? dl('Gesendet', '<span class="mono">' + fmtDay(r.sent_at) + '</span>') : dl('Geplant für', '<span class="mono">' + (r.planned_for ? fmtWhen(r.planned_for) : '–') + '</span>')) + dl('Frist', '<span class="mono">' + (r.due_at && r.status !== 'done' ? fmtDay(r.due_at) : '–') + '</span>') +
+      (r.sent_at ? dl('Gesendet', '<span class="mono">' + fmtDay(r.sent_at) + '</span>') : r.planned_for && r.status === 'planned' ? dl('Geplant für', '<span class="mono">' + fmtWhen(r.planned_for) + '</span>') : dl('Gesendet', '<span class="mono">–</span>')) + dl('Frist', '<span class="mono">' + (r.due_at && r.status !== 'done' ? fmtDay(r.due_at) : '–') + '</span>') +
       '<div class="stack" style="grid-column:1/-1;gap:2px"><dt class="label">Kontakt</dt><dd style="margin:0">' + contact + '</dd></div>' +
       (b.source_url ? '<div style="grid-column:1/-1"><dt class="label">Kontaktdaten aus</dt><dd style="margin:0" class="small"><a href="' + url(b.source_url) + '" target="_blank" rel="noopener">' + esc(sourceName(b)) + ' ' + I.ext + '</a></dd></div>' : '') +
       '</dl>' + steps + '<div class="stack" style="gap:10px"><span class="label">Verlauf</span><ol class="timeline">' + ev + '</ol></div>' +
@@ -925,7 +925,7 @@
     gmail: { name: 'Gmail', sub: 'Kostenlos · Daten liegen bei Google', open: 'https://accounts.google.com/signup', pw: 'App-Passwort', ph: 'name@gmail.com',
       steps: ['Kostenloses Google-Konto anlegen.', 'Im Google-Konto unter Sicherheit die Bestätigung in zwei Schritten einschalten.', 'Unter Sicherheit › App-Passwörter ein Passwort für Spurlos erstellen.', 'Adresse und App-Passwort unten eintragen.'],
       note: 'Funktioniert gut. Deine ganze Korrespondenz mit den Datenhändlern liegt dann aber bei Google.' },
-    domain: { name: 'Eigene Internetadresse', sub: 'Wenn du eine eigene Domain hast, z. B. bei all-inkl, Strato oder IONOS', open: '', pw: 'Passwort', ph: 'dsgvo@deine-domain.de',
+    domain: { name: 'Eigene Internetadresse', with: 'deiner eigenen Internetadresse', sub: 'Wenn du eine eigene Domain hast, z. B. bei all-inkl, Strato oder IONOS', open: '', pw: 'Passwort', ph: 'dsgvo@deine-domain.de',
       steps: ['Im Kundenmenü deines Anbieters ein neues Postfach anlegen, zum Beispiel dsgvo@deine-domain.de.', 'Adresse und Passwort unten eintragen. Die Serverdaten sucht Spurlos beim Weitergehen selbst.'],
       note: 'Kostet nichts extra, wenn dein Tarif Postfächer enthält. Die Mails liegen dann bei deinem eigenen Anbieter.' }
   };
@@ -958,7 +958,7 @@
       servers = '<div class="row wrap" style="gap:10px;padding-top:16px;border-top:1px solid var(--line-3)"><span class="small muted">' + I.ok + ' Serverdaten für ' + esc(p.name) + ' sind hinterlegt.</span><button class="btn ghost sm" data-act="show-servers">Anzeigen</button></div>';
     }
     return '<div role="radiogroup" aria-label="Anbieter" class="tiles">' + tiles + '</div>' +
-      '<section class="card"><div class="row wrap between"><h2 style="font-size:17px">So geht\'s mit ' + esc(p.name) + '</h2>' + (p.open ? '<a class="btn sm" href="' + esc(p.open) + '" target="_blank" rel="noopener">' + I.ext + '<span>Anbieter öffnen</span></a>' : '') + '</div>' +
+      '<section class="card"><div class="row wrap between"><h2 style="font-size:17px">So geht\'s mit ' + esc(p.with || p.name) + '</h2>' + (p.open ? '<a class="btn sm" href="' + esc(p.open) + '" target="_blank" rel="noopener">' + I.ext + '<span>Anbieter öffnen</span></a>' : '') + '</div>' +
       '<ol class="ol">' + steps + '</ol><div class="notice">' + I.info + '<span>' + esc(p.note) + '</span></div>' +
       '<div class="form-grid" style="padding-top:16px;border-top:1px solid var(--line-3)">' +
       '<div class="field"><label for="ma">E-Mail-Adresse' + REQ + '</label><input id="ma" class="input" type="email" data-m="address" value="' + esc(m.address) + '" placeholder="' + esc(p.ph) + '" autocomplete="off"></div>' +

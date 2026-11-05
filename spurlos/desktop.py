@@ -291,8 +291,8 @@ def _run() -> int:
             window.load_html(_error_html("Spurlos konnte nicht starten", str(exc)[:300] +
                                          " – Das Protokoll liegt unter Library › Application Support › Spurlos › spurlos.log."))
 
-    def closing():
-        # Läuft bei Fensterschließen UND bei ⌘Q / Abmelden, bevor macOS den Prozess beendet:
+    def shutdown():
+        # Bei ⌘Q, „Beenden“ im Menü oder Abmelden, bevor macOS den Prozess beendet:
         # laufende Mail zu Ende schicken, dann aufräumen. Kein Rückfrage-Dialog, der das Abmelden blockiert.
         engine.STOP.set()
         run = state["run"]
@@ -307,9 +307,77 @@ def _run() -> int:
         if state["lock"]:
             state["lock"].close()
 
+    def closing():
+        # Rotes Schließen-Feld: Fenster nur ausblenden, Spurlos arbeitet im Hintergrund weiter
+        # (Versand, Postfach, Erinnerungen). Ein Klick aufs Dock-Symbol holt das Fenster zurück.
+        if state["quit"] or not state["run"]:
+            shutdown()
+            return None
+        _save_window_geometry(config, window)
+        state["hidden"] = True
+        window.hide()
+        _first_hide_hint(engine)
+        return False
+
+    state["quit"] = False
+    state["hidden"] = False
+    _hook_quit(state)
+    _show_on_activate(window, state)
     window.events.closing += closing
     webview.start(func=start_server)
     return 0
+
+
+def _hook_quit(state: dict) -> None:
+    """Unterscheiden, ob macOS die App beenden will (⌘Q, Menü, Abmelden) oder nur das Fenster zugeht.
+
+    pywebview fragt in beiden Fällen dieselbe Funktion. Beim Beenden kommt der Aufruf aus
+    applicationShouldTerminate_, beim Schließen-Feld aus windowShouldClose_."""
+    try:
+        from webview.platforms import cocoa
+    except Exception:  # noqa: BLE001
+        return
+    original = cocoa.BrowserView.should_close
+
+    def should_close(window):
+        caller = sys._getframe(1).f_code.co_name
+        state["quit"] = caller != "windowShouldClose_"
+        return original(window)
+
+    cocoa.BrowserView.should_close = staticmethod(should_close)
+
+
+def _show_on_activate(window, state: dict) -> None:
+    """Fenster wieder zeigen, wenn die App aktiv wird (Klick aufs Dock-Symbol, ⌘-Tab)."""
+    try:
+        import AppKit
+        from Foundation import NSObject, NSNotificationCenter
+
+        class Reopen(NSObject):
+            def activated_(self, note):
+                if state.get("hidden") and not state.get("quit"):
+                    state["hidden"] = False
+                    window.show()
+
+        state["_reopen"] = Reopen.alloc().init()
+        NSNotificationCenter.defaultCenter().addObserver_selector_name_object_(
+            state["_reopen"], "activated:", AppKit.NSApplicationDidBecomeActiveNotification, None)
+    except Exception:  # noqa: BLE001
+        import logging
+        logging.getLogger("spurlos").warning("Dock-Klick zum Wiederöffnen nicht verfügbar", exc_info=True)
+
+
+def _first_hide_hint(engine) -> None:
+    """Einmalig erklären, dass Spurlos weiterläuft."""
+    from . import db
+    try:
+        if db.get("hide_hint_shown"):
+            return
+        db.put("hide_hint_shown", True)
+        engine.notify("Spurlos läuft im Hintergrund weiter. Klick aufs Dock-Symbol zeigt das Fenster, "
+                      "Beenden geht über das Menü Spurlos.")
+    except Exception:  # noqa: BLE001
+        pass
 
 
 LOADING_HTML = """<!doctype html><html lang="de"><meta charset="utf-8"><body style="margin:0;height:100vh;display:flex;align-items:center;

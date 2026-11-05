@@ -24,10 +24,10 @@ Fragt macOS später einmal nach dem Zugriff auf den Schlüsselbund, klick auf **
 
 ## Benutzen
 
-- Spurlos arbeitet, solange das Fenster offen ist: Dann verschickt es Anfragen und ruft das Postfach ab.
+- Spurlos arbeitet, solange es läuft: Dann verschickt es Anfragen und ruft das Postfach ab. Das Fenster kannst du schließen, Spurlos läuft im Hintergrund weiter (Symbol im Dock). Ein Klick aufs Dock-Symbol holt das Fenster zurück.
 - Die Anfragen gehen einzeln raus, zwischen 8 und 20 Uhr, am ersten Tag wenige, danach mehr. So landen sie nicht im Spam. Spurlos zeigt dir, in wie vielen Tagen alle verschickt sind.
-- Schläft dein Mac oder ist Spurlos zu, holt es alles beim nächsten Start nach.
-- Beenden mit ⌘Q. Eine gerade laufende Mail wird noch fertig verschickt.
+- Schläft dein Mac oder ist Spurlos beendet, holt es alles beim nächsten Start nach.
+- Beenden über das Menü „Spurlos → Spurlos beenden“ oder mit ⌘Q. Eine gerade laufende Mail wird noch fertig verschickt.
 
 ## Aus dem Quellcode starten (für Entwickler)
 
