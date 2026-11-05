@@ -58,3 +58,13 @@ Spurlos hilft dir, deine Rechte nach der Datenschutz-Grundverordnung und dem Sch
 Die Firmenliste stammt aus der offenen Datenbank von datenanfragen.de (CC0), der öffentlichen Liste von Incogni, dem Datenhändler-Register des US-Bundesstaats Kalifornien und eigener Recherche. Die Kontaktadressen wurden im November 2026 auf den Datenschutzseiten der Firmen geprüft. Kontaktdaten können sich ändern. Wenn eine Mail nicht zugestellt wird, zeigt Spurlos das an, und du kannst die Adresse in der Händlerliste korrigieren.
 
 Schrift: IBM Plex (SIL Open Font License).
+
+## Ohne Gewähr
+
+Spurlos wird kostenlos und ohne jede Gewähr bereitgestellt. Jeder Nutzer verschickt die Anfragen in seinem eigenen Namen, aus seinem eigenen Postfach, und ist für deren Inhalt und Versand selbst verantwortlich. Die Entwickler haften nicht für Schäden, die aus der Nutzung entstehen.
+
+## Lizenz
+
+Copyright (C) 2026 die Spurlos-Autoren (github.com/nikoz-nx/spurlos)
+
+Spurlos ist freie Software: Du darfst es unter den Bedingungen der GNU General Public License, Version 3, nutzen, verändern und weitergeben. Wer eine veränderte Fassung weitergibt, muss deren Quellcode ebenfalls unter dieser Lizenz offenlegen. Den vollständigen Text findest du in der Datei [LICENSE](LICENSE).
