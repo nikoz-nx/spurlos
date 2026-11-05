@@ -75,6 +75,10 @@ def create_app() -> Flask:
     def value_error(exc):
         return fail(str(exc))
 
+    @app.errorhandler(engine.Busy)
+    def busy_error(exc):
+        return fail(str(exc), 409)
+
     @app.errorhandler(Exception)
     def any_error(exc):
         from werkzeug.exceptions import HTTPException
@@ -100,6 +104,7 @@ def create_app() -> Flask:
             providers={k: v["label"] for k, v in mail.PROVIDERS.items()},
             all_countries=brokers.COUNTRIES, group_meta=brokers.GROUPS, group_order=brokers.GROUP_ORDER,
             states=sorted(brokers.authorities().keys()), secret_storage=secrets_store.storage_name(),
+            status_help=engine.STATUS_HELP,
             data_dir=str(config.data_dir()), templates=texts.TEMPLATE_LIST,
             categories={k: v["label"] for k, v in classify.CATEGORIES.items()},
         )
@@ -208,14 +213,22 @@ def create_app() -> Flask:
         return ok()
 
     # ------------------------------------------------------------------ Einstellungen
+    @app.get("/api/estimate")
+    def estimate():
+        try:
+            n = int(request.args.get("n") or 0)
+        except ValueError:
+            n = 0
+        return ok(days=engine.estimate_days(n), today=engine.daily_cap(engine._send_days_so_far()))
+
     @app.post("/api/settings/sending")
     def save_sending():
         data = body()
         cfg = db.get("sending")
-        for key in ("per_day", "reminder_days", "complaint_days", "poll_minutes"):
+        for key in ("reminder_days", "complaint_days", "poll_minutes"):
             if key in data:
                 cfg[key] = max(1, int(data[key]))
-        for key in ("auto_remind", "notifications", "first_batch_now"):
+        for key in ("auto_remind", "notifications"):
             if key in data:
                 cfg[key] = bool(data[key])
         if "send_time" in data and len(str(data["send_time"])) == 5:
@@ -360,7 +373,7 @@ def create_app() -> Flask:
     def _status_view(r: dict) -> dict:
         grp, label = engine.STATUS.get(r["status"], ("todo", r["status"]))
         if r["status"] == "done":
-            label = engine.OUTCOME_LABEL.get(r.get("outcome") or "", "Erledigt")
+            label = engine.OUTCOME_LABEL.get(r.get("outcome") or "", "Von dir abgeschlossen")
         elif r.get("label"):
             label = r["label"]
         return {"group": grp, "label": label}
@@ -398,11 +411,14 @@ def create_app() -> Flask:
             todos.append({"n": len(missing), "title": "Kontakt fehlt", "sub": ", ".join(i["broker_name"] for i in missing[:4]),
                           "href": "#/anfragen?f=missing", "cta": "Ergänzen"})
         plan = []
-        nxt = db.query_one("SELECT planned_for, COUNT(*) AS n FROM requests WHERE status = 'planned' AND planned_for IS NOT NULL "
-                           "GROUP BY substr(planned_for, 1, 10) ORDER BY planned_for LIMIT 1")
-        if nxt and nxt["n"]:
-            plan.append({"when": nxt["planned_for"], "title": "%d Anfragen senden" % nxt["n"],
-                         "sub": "%d weitere danach" % max(0, counts["planned"] - nxt["n"])})
+        nxt = db.query_one("SELECT MIN(planned_for) AS p FROM requests WHERE status = 'planned' AND planned_for IS NOT NULL")
+        eta = engine.estimate_days() if counts["planned"] else 0
+        if nxt and nxt["p"]:
+            today = db.query_one("SELECT COUNT(*) AS n FROM requests WHERE status = 'planned' AND substr(planned_for, 1, 10) = ?",
+                                 (db.now()[:10],))["n"]
+            plan.append({"when": nxt["p"], "title": "Nächste Anfrage senden",
+                         "sub": ("%d heute, " % today if today else "") + "alle %d voraussichtlich in %s" % (
+                             counts["planned"], "1 Tag" if eta <= 1 else "%d Tagen" % eta)})
         sending = db.get("sending")
         plan.append({"when": "alle %d Min." % int(sending.get("poll_minutes") or 15), "title": "Postfach abrufen und Antworten zuordnen",
                      "sub": "Zuletzt: %s" % (db.get("last_poll") or "noch nie")})
@@ -419,7 +435,8 @@ def create_app() -> Flask:
         for a in activity:
             a.update(_status_view({"status": a["status"] or "planned", "label": a["label"], "outcome": a["outcome"]}))
         mb = db.get("mailbox")
-        return ok(counts=counts, total=total, sent=sent, replies=replies, outcomes=outcomes, todos=todos, plan=plan,
+        return ok(counts=counts, total=total, sent=sent, replies=replies, outcomes=outcomes, todos=todos, plan=plan, eta_days=eta,
+                  busy=engine.BUSY["what"],
                   activity=activity, inbox=inbox, started=db.get("started"),
                   mailbox={"address": mb.get("address"),
                            "ok": not (db.get("last_poll_error") or secrets_store.LAST_ERROR["text"]),

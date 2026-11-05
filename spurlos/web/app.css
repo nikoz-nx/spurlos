@@ -241,3 +241,19 @@ textarea.input { height: auto; min-height: 120px; padding: 10px 12px; line-heigh
   .main, .onb-main { padding: 24px 16px 40px; }
 }
 svg { flex-shrink: 0; }
+
+/* Start-Animation */
+.launch { position: fixed; inset: 0; z-index: 60; background: rgba(14,17,22,.55); display: flex; align-items: center; justify-content: center; animation: fadein .2s; }
+.launch-box { position: relative; width: min(520px, 90vw); padding: 40px 32px 28px; border-radius: 16px; background: var(--surface); text-align: center; overflow: hidden; box-shadow: 0 20px 60px rgba(14,17,22,.3); display: flex; flex-direction: column; gap: 6px; align-items: center; }
+.launch-sky { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
+.launch-sky .env { position: absolute; bottom: 30%; font-size: 22px; color: var(--accent); animation: fly linear forwards; }
+@keyframes fly { from { transform: translateY(0) rotate(-10deg); opacity: 1; } to { transform: translateY(-260px) rotate(15deg); opacity: 0; } }
+@keyframes fadein { from { opacity: 0; } to { opacity: 1; } }
+.launch-n { font-size: 64px; font-weight: 600; line-height: 1; font-variant-numeric: tabular-nums; color: var(--accent); }
+.launch-t { font-size: 15px; color: var(--muted); }
+.launch-s { margin-top: 10px; font-size: 14px; line-height: 1.5; min-height: 42px; }
+.launch-box .btn { margin-top: 12px; }
+
+.pillw .pill { cursor: default; }
+.pillw .tip { width: 260px; font-size: 12.5px; }
+.trow .pillw .tip, .list .pillw .tip { top: auto; bottom: calc(100% + 8px); }

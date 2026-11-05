@@ -120,6 +120,32 @@ def selftest() -> int:
         run.stop()
 
 
+def setup_notifications():
+    """Mitteilungen als „Spurlos“ statt über den Script Editor. Nur in der fertigen App möglich."""
+    if not getattr(sys, "frozen", False):
+        return
+    try:
+        from UserNotifications import (UNUserNotificationCenter, UNMutableNotificationContent,
+                                       UNNotificationRequest, UNAuthorizationOptionAlert, UNAuthorizationOptionSound)
+        import uuid
+        center = UNUserNotificationCenter.currentNotificationCenter()
+        center.requestAuthorizationWithOptions_completionHandler_(
+            UNAuthorizationOptionAlert | UNAuthorizationOptionSound, lambda granted, error: None)
+
+        def notifier(text: str) -> bool:
+            content = UNMutableNotificationContent.alloc().init()
+            content.setTitle_("Spurlos")
+            content.setBody_(text)
+            req = UNNotificationRequest.requestWithIdentifier_content_trigger_(str(uuid.uuid4()), content, None)
+            center.addNotificationRequest_withCompletionHandler_(req, lambda error: None)
+            return True
+
+        from . import engine
+        engine.NOTIFIER = notifier
+    except Exception:  # noqa: BLE001
+        pass   # dann weiter über osascript
+
+
 def setup_logging():
     """Protokoll in eine Datei: Aus dem Finder gestartet hat die App kein Terminal."""
     import faulthandler
@@ -187,6 +213,20 @@ class Api:
         subprocess.Popen(["open", "-R", str(config.data_dir() / "spurlos.log")])
         return True
 
+    def save_backup(self, text: str, filename: str):
+        """Sichern-Dialog des Macs; schreibt die Datei und meldet den Pfad zurück (oder None)."""
+        import webview
+        from pathlib import Path
+        if not self.window or not isinstance(text, str):
+            return None
+        downloads = str(Path.home() / "Downloads")
+        result = self.window.create_file_dialog(webview.SAVE_DIALOG, directory=downloads, save_filename=str(filename))
+        if not result:
+            return None
+        path = result[0] if isinstance(result, (list, tuple)) else result
+        Path(path).write_text(text, encoding="utf-8")
+        return str(path)
+
 
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(prog="Spurlos")
@@ -212,48 +252,101 @@ def _run() -> int:
     setup_logging()
     import webview  # erst hier: wird für den Selbsttest nicht gebraucht
 
-    from . import engine, server
+    from . import config, engine, server
 
-    lock = server.acquire_lock()
-    run = None
-    if lock is None:
-        # Läuft schon (z. B. die Terminal-Fassung): dessen Oberfläche im Fenster zeigen.
-        info = server.existing_instance()
-        if not info:
-            show_error("Spurlos läuft schon",
-                       "Ein anderes Spurlos scheint zu laufen, antwortet aber nicht. Beende es "
-                       "(z. B. das Terminal-Fenster) und starte Spurlos danach noch einmal.")
-            return 1
-        url = server.url_for(info)
-    else:
-        run = server.start(8765)
-        url = run.url
-
+    state = {"run": None, "lock": None}
+    api = Api("")
     _activity = keep_awake()  # noqa: F841 – Referenz halten, solange die App läuft
-    api = Api(url)
+    setup_notifications()
     webview.settings["OPEN_EXTERNAL_LINKS_IN_BROWSER"] = True   # Links zu Webformularen im Browser öffnen
-    webview.settings["ALLOW_DOWNLOADS"] = True                    # Sicherungen und Beschwerde-Texte speichern
-    window = webview.create_window("Spurlos", url, width=1280, height=860, min_size=(960, 640),
-                                   text_select=True, zoomable=True, js_api=api, localization=GERMAN)
+    webview.settings["ALLOW_DOWNLOADS"] = True                    # Beschwerde-Texte speichern
+
+    geo = _load_window_geometry(config)
+    window = webview.create_window("Spurlos", html=LOADING_HTML, width=geo["w"], height=geo["h"], x=geo.get("x"), y=geo.get("y"),
+                                   min_size=(960, 640), text_select=True, zoomable=True, js_api=api, localization=GERMAN)
     api.window = window
+
+    def start_server():
+        # Läuft, sobald das Fenster steht: Datenbank öffnen, Server starten, Oberfläche laden.
+        try:
+            lock = server.acquire_lock()
+            if lock is None:
+                info = server.existing_instance()
+                if not info:
+                    window.load_html(_error_html("Spurlos läuft schon",
+                                                 "Ein anderes Spurlos scheint zu laufen, antwortet aber nicht. "
+                                                 "Beende es (z. B. das Terminal-Fenster) und starte Spurlos danach noch einmal."))
+                    return
+                url = server.url_for(info)
+            else:
+                state["lock"] = lock
+                state["run"] = server.start(8765)
+                url = state["run"].url
+            api.url = url
+            window.load_url(url)
+        except Exception as exc:  # noqa: BLE001
+            import logging
+            import traceback
+            logging.getLogger("spurlos").error("Start fehlgeschlagen:\n%s", traceback.format_exc())
+            window.load_html(_error_html("Spurlos konnte nicht starten", str(exc)[:300] +
+                                         " – Das Protokoll liegt unter Library › Application Support › Spurlos › spurlos.log."))
 
     def closing():
         # Läuft bei Fensterschließen UND bei ⌘Q / Abmelden, bevor macOS den Prozess beendet:
         # laufende Mail zu Ende schicken, dann aufräumen. Kein Rückfrage-Dialog, der das Abmelden blockiert.
         engine.STOP.set()
+        run = state["run"]
         if run:
+            _save_window_geometry(config, window)
             got = engine._RUN_LOCK.acquire(timeout=25)
             try:
                 run.stop()
             finally:
                 if got:
                     engine._RUN_LOCK.release()
-        if lock:
-            lock.close()
+        if state["lock"]:
+            state["lock"].close()
 
     window.events.closing += closing
-    webview.start()
+    webview.start(func=start_server)
     return 0
+
+
+LOADING_HTML = """<!doctype html><html lang="de"><meta charset="utf-8"><body style="margin:0;height:100vh;display:flex;align-items:center;
+justify-content:center;font-family:-apple-system,system-ui;background:#F4F5F7;color:#5B6472"><div style="text-align:center">
+<div style="width:28px;height:28px;border:3px solid #D5DAE2;border-top-color:#1F8A5B;border-radius:50%;margin:0 auto 14px;
+animation:s .8s linear infinite"></div>Spurlos startet …</div><style>@keyframes s{to{transform:rotate(360deg)}}</style></body></html>"""
+
+
+def _error_html(title: str, text: str) -> str:
+    import html
+    return ("<!doctype html><html lang=\"de\"><meta charset=\"utf-8\"><body style=\"margin:0;height:100vh;display:flex;align-items:center;"
+            "justify-content:center;font-family:-apple-system,system-ui;background:#F4F5F7;color:#0E1116\">"
+            "<div style=\"max-width:480px;padding:24px;text-align:center\"><h2 style=\"margin:0 0 8px\">%s</h2>"
+            "<p style=\"color:#5B6472;line-height:1.5\">%s</p></div></body></html>" % (html.escape(title), html.escape(text)))
+
+
+def _load_window_geometry(config) -> dict:
+    import json
+    geo = {"w": 1280, "h": 860}
+    try:
+        saved = json.loads((config.data_dir() / "window.json").read_text(encoding="utf-8"))
+        if 960 <= int(saved.get("w", 0)) <= 6000 and 640 <= int(saved.get("h", 0)) <= 4000:
+            geo.update({"w": int(saved["w"]), "h": int(saved["h"])})
+            if isinstance(saved.get("x"), int) and isinstance(saved.get("y"), int):
+                geo.update({"x": saved["x"], "y": saved["y"]})
+    except Exception:  # noqa: BLE001
+        pass
+    return geo
+
+
+def _save_window_geometry(config, window) -> None:
+    import json
+    try:
+        (config.data_dir() / "window.json").write_text(json.dumps({
+            "w": int(window.width), "h": int(window.height), "x": int(window.x), "y": int(window.y)}), encoding="utf-8")
+    except Exception:  # noqa: BLE001
+        pass
 
 
 if __name__ == "__main__":

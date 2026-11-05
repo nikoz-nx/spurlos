@@ -14,7 +14,7 @@ a = Analysis(
         (str(ROOT / "spurlos" / "web"), "spurlos/web"),
         (str(ROOT / "spurlos" / "data"), "spurlos/data"),
     ],
-    hiddenimports=["keyring.backends.macOS", "webview.platforms.cocoa"],
+    hiddenimports=["keyring.backends.macOS", "webview.platforms.cocoa", "UserNotifications", "Foundation", "AppKit"],
     excludes=["tkinter"],
 )
 pyz = PYZ(a.pure)
@@ -42,6 +42,7 @@ app = BUNDLE(
         "LSMinimumSystemVersion": "12.0",
         "LSApplicationCategoryType": "public.app-category.utilities",
         "NSHighResolutionCapable": True,
+        "NSUserNotificationAlertStyle": "banner",
         "LSAppNapIsDisabled": True,
         "NSLocalNetworkUsageDescription": "Nur nötig, wenn dein Mailserver im eigenen Netzwerk steht.",
         "NSHumanReadableCopyright": "Freie Software unter der GNU GPL v3",

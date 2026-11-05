@@ -13,22 +13,45 @@ from datetime import date, datetime, timedelta
 from . import brokers, classify, db, mail, secrets_store, texts
 
 STATUS = {
-    "planned": ("planned", "Geplant"),
-    "sent": ("wait", "Wartet"),
+    "planned": ("planned", "Versand geplant"),
+    "sent": ("wait", "Anfrage verschickt"),
     "ack": ("wait", "Eingang bestätigt"),
-    "followup": ("wait", "Antwort gesendet"),
-    "review": ("todo", "Prüfen"),
-    "webform": ("todo", "Formular offen"),
+    "followup": ("wait", "Rückfrage beantwortet"),
+    "review": ("todo", "Antwort prüfen"),
+    "webform": ("todo", "Formular nötig"),
     "failed": ("todo", "Zustellung fehlgeschlagen"),
-    "complaint": ("todo", "Beschwerde vorbereiten"),
-    "overdue": ("overdue", "Überfällig"),
-    "reminded": ("overdue", "Erinnert"),
-    "done": ("done", "Erledigt"),
+    "complaint": ("todo", "Beschwerde möglich"),
+    "overdue": ("overdue", "Frist abgelaufen"),
+    "reminded": ("overdue", "Erinnerung verschickt"),
+    "done": ("done", "Abgeschlossen"),
     "no_contact": ("missing", "Kontakt fehlt"),
-    "letter": ("missing", "Nur per Post"),
+    "letter": ("missing", "Brief nötig"),
 }
-OUTCOME_LABEL = {"no_data": "Keine Daten", "deleted": "Gelöscht", "objection": "Widerspruch bestätigt",
-                 "access_only": "Auskunft erhalten", "manual": "Erledigt", "webform": "Formular abgeschickt"}
+OUTCOME_LABEL = {"no_data": "Keine Daten", "deleted": "Daten gelöscht", "objection": "Widerspruch bestätigt",
+                 "access_only": "Auskunft erhalten", "manual": "Von dir abgeschlossen", "webform": "Formular abgeschickt"}
+# Erklärung je Plakette (erscheint beim Drüberfahren mit der Maus)
+STATUS_HELP = {
+    "Versand geplant": "Die Anfrage ist fertig und geht automatisch raus, einzeln über den Tag verteilt. Du musst nichts tun.",
+    "Anfrage verschickt": "Die Anfrage ist raus. Die Firma hat einen Monat Zeit zu antworten. Kommt nichts, erinnert Spurlos von selbst.",
+    "Eingang bestätigt": "Die Firma hat den Eingang bestätigt, die eigentliche Antwort fehlt noch. Spurlos wartet weiter.",
+    "Rückfrage beantwortet": "Die Firma hatte eine Rückfrage, zum Beispiel nach einem Ausweis. Spurlos hat geantwortet und wartet wieder.",
+    "Antwort prüfen": "Spurlos ist sich bei einer Antwort nicht sicher. Schau sie dir im Eingang kurz an und bestätige, was die Firma meint.",
+    "Formular nötig": "Diese Firma nimmt Anfragen nur über ein Formular auf ihrer Website an. Den Text zum Einfügen findest du bei der Anfrage.",
+    "Zustellung fehlgeschlagen": "Die E-Mail kam nicht an, die Adresse funktioniert nicht. Du kannst in der Händlerliste eine andere eintragen.",
+    "Beschwerde möglich": "Die Firma hat trotz Erinnerung nicht geantwortet. Der Text für eine kostenlose Beschwerde bei der Datenschutzbehörde liegt bereit.",
+    "Frist abgelaufen": "Die Firma hat nach einem Monat nicht geantwortet. Spurlos schickt automatisch eine Erinnerung.",
+    "Erinnerung verschickt": "Die Firma hat eine Erinnerung bekommen und noch eine kurze Nachfrist.",
+    "Abgeschlossen": "Die Firma hat geantwortet, der Fall ist zu Ende.",
+    "Kontakt fehlt": "Für diese Firma ist keine Adresse bekannt. Du kannst eine in der Händlerliste nachtragen.",
+    "Brief nötig": "Diese Firma nimmt Anfragen nur per Post an. Das Drucken kommt in einer späteren Version.",
+    "Keine Daten": "Die Firma hatte nichts über dich gespeichert.",
+    "Daten gelöscht": "Die Firma hat deine Daten gelöscht.",
+    "Widerspruch bestätigt": "Die Firma nutzt deine Daten nicht mehr für Werbung.",
+    "Auskunft erhalten": "Bei Auskunfteien: Du hast deine Auskunft bekommen. Gelöscht wird dort nichts.",
+    "Von dir abgeschlossen": "Du hast die Anfrage selbst als abgeschlossen markiert, zum Beispiel nach einem Brief.",
+    "Formular abgeschickt": "Du hast das Webformular der Firma ausgefüllt. Spurlos überwacht ab jetzt die Frist.",
+    "Link bestätigt": "Du hast den Bestätigungslink der Firma angeklickt. Spurlos wartet auf die eigentliche Antwort.",
+}
 
 _RUN_LOCK = threading.Lock()
 
@@ -46,11 +69,20 @@ def _iso(dt: datetime) -> str:
     return dt.replace(microsecond=0).isoformat(sep=" ")
 
 
+NOTIFIER = None   # setzt die Mac-App: Mitteilungszentrum statt osascript
+
+
 def notify(text: str) -> None:
     if not (db.get("sending") or {}).get("notifications", True):
         return
     if sys.platform != "darwin":
         return
+    if NOTIFIER:
+        try:
+            if NOTIFIER(text[:180]):
+                return
+        except Exception:  # noqa: BLE001
+            pass
     # Text als Argument übergeben, nicht ins Skript einsetzen: Firmennamen sind Fremddaten.
     # LANG setzen, sonst kommen Umlaute aus einer per Finder gestarteten App kaputt an.
     env = dict(os.environ, LANG="de_DE.UTF-8", LC_ALL="de_DE.UTF-8")
@@ -173,33 +205,78 @@ def build_requests() -> dict:
     return created
 
 
-def plan_batches(first_now: bool | None = None) -> None:
-    sending = db.get("sending")
-    per_day = max(1, int(sending.get("per_day") or 10))
-    hh, mm = (sending.get("send_time") or "09:00").split(":")
+# Versandplan: Spurlos entscheidet selbst, wie viele Mails pro Tag vertretbar sind.
+# Ein neues Postfach fängt klein an und steigert sich; die Mails gehen einzeln raus,
+# mit Abstand, verteilt über den Tag – so wirkt es wie normales Schreiben, nicht wie Werbung.
+RAMP = [15, 25, 35]      # Tag 1, 2, 3 …
+DAILY_MAX = 40           # … danach
+SEND_FROM, SEND_UNTIL = 8, 20   # Uhrzeiten, zwischen denen verschickt wird
+
+
+def _send_days_so_far() -> int:
+    """An wie vielen früheren Tagen schon Anfragen rausgingen (für die Steigerung)."""
+    today = date.today().isoformat()
+    row = db.query_one("SELECT COUNT(DISTINCT substr(date, 1, 10)) AS n FROM messages "
+                       "WHERE direction = 'out' AND kind = 'request' AND substr(date, 1, 10) < ?", (today,))
+    return int(row["n"]) if row else 0
+
+
+def daily_cap(day_index: int) -> int:
+    return RAMP[day_index] if day_index < len(RAMP) else DAILY_MAX
+
+
+def _day_slots(day_start: datetime, n: int, not_before: datetime | None = None) -> list:
+    """n Zeitpunkte, gleichmäßig zwischen 8 und 20 Uhr (bzw. ab jetzt) verteilt."""
+    begin = day_start.replace(hour=SEND_FROM, minute=0, second=0, microsecond=0)
+    end = day_start.replace(hour=SEND_UNTIL, minute=0, second=0, microsecond=0)
+    if not_before and not_before > begin:
+        begin = not_before
+    if n <= 0 or begin >= end:
+        return []
+    step = (end - begin) / n
+    return [begin + step * i + timedelta(seconds=(i * 37) % 60) for i in range(n)]
+
+
+def plan_batches(first_now: bool | None = None) -> None:   # first_now bleibt für alte Aufrufer
     rows = db.query("SELECT r.id, b.grp, b.origin FROM requests r JOIN brokers b ON b.id = r.broker_id "
                     "WHERE r.status = 'planned' ORDER BY r.id")
     order = {g: i for i, g in enumerate(brokers.GROUP_ORDER)}
     origin_rank = {"datenanfragen": 0, "recherche": 1, "incogni": 2, "eigene": 0, "kalifornien": 3}
     rows.sort(key=lambda r: (order.get(r["grp"] or "consumer", 9), origin_rank.get(r["origin"], 5), r["id"]))
-    now = datetime.now()
-    sent_today = sent_count_today()
-    start = now.replace(hour=int(hh), minute=int(mm), second=0, microsecond=0)
-    if first_now is None:
-        first_now = bool(sending.get("first_batch_now", True)) and not db.get("started")
-    slots = []
-    day = 0
-    capacity_today = max(0, per_day - sent_today)
-    if first_now or now >= start:
-        # Heute noch Platz? Dann sofort bzw. ab jetzt.
-        slots.extend([now] * capacity_today)
-        day = 1
-    while len(slots) < len(rows):
-        slot_time = start + timedelta(days=day)
-        slots.extend([slot_time] * per_day)
-        day += 1
-    for row, slot in zip(rows, slots):
+    for row, slot in zip(rows, _plan_slots(len(rows))):
         _set(row["id"], planned_for=_iso(slot))
+
+
+def _plan_slots(n: int) -> list:
+    now = datetime.now()
+    day_index = _send_days_so_far()
+    slots = []
+    # Heute: was heute noch frei ist, ab jetzt (erste Mail sofort)
+    today_left = max(0, daily_cap(day_index) - sent_count_today())
+    if now.hour < SEND_UNTIL and today_left:
+        take = min(today_left, n)
+        slots.extend(_day_slots(now, take, not_before=now))
+        if slots:
+            slots[0] = now
+        if sent_count_today() or slots:
+            day_index += 1
+    day = 1
+    while len(slots) < n:
+        cap = daily_cap(day_index)
+        slots.extend(_day_slots(now + timedelta(days=day), min(cap, n - len(slots))))
+        day_index += 1
+        day += 1
+    return slots[:n]
+
+
+def estimate_days(n: int | None = None) -> int:
+    """In wie vielen Tagen alle (geplanten) Anfragen voraussichtlich verschickt sind."""
+    if n is None:
+        n = db.query_one("SELECT COUNT(*) AS c FROM requests WHERE status = 'planned'")["c"]
+    if n <= 0:
+        return 0
+    last = _plan_slots(n)[-1]
+    return (last.date() - date.today()).days + 1
 
 
 def sent_count_today() -> int:
@@ -224,14 +301,24 @@ def send_request(ref: str) -> None:
     if not b.get("email"):
         raise mail.MailError("Für %s ist keine E-Mail-Adresse hinterlegt." % b.get("name"))
     subject, body = render_request(req, b)
-    msg_id = mail.send(cfg, pw, b["email"], subject, body)
+    msg_id = mail.new_message_id(cfg)
+    _set(req["id"], last_message_id=msg_id)   # vorab merken: falls die Verbindung mittendrin abreißt
+    note = None
+    try:
+        mail.send(cfg, pw, b["email"], subject, body, message_id=msg_id)
+    except mail.MailError as exc:
+        if not getattr(exc, "maybe_sent", False):
+            raise
+        # Mail war schon beim Server, nur die Bestätigung kam nicht an. Lieber als verschickt
+        # werten als doppelt senden – bleibt eine Antwort aus, erinnert Spurlos ohnehin.
+        note = "Verbindung brach beim Versand ab; die Anfrage gilt als verschickt."
     now = datetime.now()
     _set(req["id"], status="sent", label=None, sent_at=_iso(now), due_at=_iso(due_from(now, b)),
          reminder_sent_at=None, reminder_due_at=None, last_message_id=msg_id, planned_for=None)
     db.execute("INSERT INTO messages(request_id, direction, kind, message_id, from_addr, to_addr, subject, date, body, created_at) "
                "VALUES (?, 'out', 'request', ?, ?, ?, ?, ?, ?, ?)",
                (req["id"], msg_id, cfg["address"], b["email"], subject, _iso(now), body, db.now()))
-    db.event(req["id"], "sent", "Anfrage per E-Mail gesendet an %s" % b["email"])
+    db.event(req["id"], "sent", "Anfrage per E-Mail gesendet an %s" % b["email"] + (" – " + note if note else ""))
 
 
 def send_followup(ref: str, kind: str, body_override: str | None = None) -> None:
@@ -282,15 +369,14 @@ def send_due(force: bool = False) -> dict:
     pause = _parse(db.get("send_pause_until"))
     if pause and pause > datetime.now() and not force:
         return {"sent": 0, "paused": True}
-    per_day = max(1, int(db.get("sending").get("per_day") or 10))
-    quota = per_day - sent_count_today()
-    if quota <= 0 and not force:
+    quota = daily_cap(_send_days_so_far()) - sent_count_today()
+    if quota <= 0:
         return {"sent": 0}
     now_s = db.now()
     if force:
-        # „Etappe jetzt senden“: die nächste Etappe sofort, egal für wann sie geplant war.
+        # „Jetzt senden“: was heute noch vertretbar ist, sofort statt verteilt.
         rows = db.query("SELECT ref FROM requests WHERE status = 'planned' ORDER BY planned_for IS NULL, planned_for, id "
-                        "LIMIT ?", (per_day,))
+                        "LIMIT ?", (quota,))
     else:
         rows = db.query("SELECT ref FROM requests WHERE status = 'planned' AND planned_for IS NOT NULL AND planned_for <= ? "
                         "ORDER BY planned_for, id LIMIT ?", (now_s, quota))
@@ -635,7 +721,7 @@ def action(ref: str, name: str, data: dict | None = None) -> dict:
         send_followup(ref, name, data.get("body"))
     elif name == "done":
         _set(req["id"], status="done", outcome=data.get("outcome") or "manual", label=None, closed_at=db.now())
-        db.event(req["id"], "done", "Als erledigt markiert")
+        db.event(req["id"], "done", "Von dir als abgeschlossen markiert")
     elif name == "webform_sent":
         now = datetime.now()
         _set(req["id"], status="sent", label="Formular abgeschickt", sent_at=_iso(now),
@@ -743,7 +829,9 @@ class Scheduler(threading.Thread):
             if self.poll_failures:
                 wait = min(4 * 3600, wait * 2 ** self.poll_failures)   # bei Fehlern seltener versuchen
             if now - self.last_poll >= wait:
+                _busy("Postfach abrufen und Antworten einordnen")
                 result = poll()
+                _busy(None)
                 if result.get("ok"):
                     self.poll_failures = 0
                 elif result.get("unreachable"):
@@ -753,7 +841,9 @@ class Scheduler(threading.Thread):
                     self.last_poll = now
                 if result.get("ok"):
                     self.last_poll = now
+            _busy("Anfragen verschicken")
             send_due()
+            _busy(None)
             if now - self.last_deadline >= 3600:
                 check_deadlines()
                 self.last_deadline = now
@@ -774,6 +864,23 @@ class Scheduler(threading.Thread):
             self._updating = False
 
 
+BUSY = {"what": None, "since": None}   # was die Hintergrund-Abläufe gerade tun (für die Oberfläche)
+
+
+class Busy(Exception):
+    pass
+
+
 def run_locked(fn, *args, **kwargs):
-    with _RUN_LOCK:
+    """Aus der Oberfläche: kurz warten; läuft gerade ein langer Abruf, lieber sofort Bescheid sagen."""
+    if not _RUN_LOCK.acquire(timeout=8):
+        raise Busy("Spurlos ist gerade beschäftigt (%s). Bitte gleich noch einmal versuchen." % (BUSY["what"] or "Postfach abrufen"))
+    try:
         return fn(*args, **kwargs)
+    finally:
+        _RUN_LOCK.release()
+
+
+def _busy(what):
+    BUSY["what"] = what
+    BUSY["since"] = db.now() if what else None

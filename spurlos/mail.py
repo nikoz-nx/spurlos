@@ -287,9 +287,14 @@ def build_message(cfg: dict, to: str, subject: str, body: str, message_id: str |
     return msg
 
 
+def new_message_id(cfg: dict) -> str:
+    sender = cfg.get("address") or ""
+    return make_msgid(domain=sender.split("@", 1)[1] if "@" in sender else None)
+
+
 def send(cfg: dict, password: str, to: str, subject: str, body: str, in_reply_to: str | None = None,
-         references: str | None = None) -> str:
-    msg = build_message(cfg, to, subject, body, in_reply_to=in_reply_to, references=references)
+         references: str | None = None, message_id: str | None = None) -> str:
+    msg = build_message(cfg, to, subject, body, in_reply_to=in_reply_to, references=references, message_id=message_id)
     smtp = connect_smtp(cfg, password)
     try:
         refused = smtp.send_message(msg)
@@ -298,8 +303,10 @@ def send(cfg: dict, password: str, to: str, subject: str, body: str, in_reply_to
     except smtplib.SMTPException as exc:
         raise MailError("Versand fehlgeschlagen: %s" % _short(exc)) from exc
     except OSError as exc:
-        # Verbindung mittendrin weg (z. B. Mac schläft ein): nicht gleich noch mal, sonst geht die Mail doppelt raus
-        raise MailError("Versand abgebrochen, Verbindung verloren: %s" % _short(exc)) from exc
+        # Verbindung mittendrin weg (z. B. Mac schläft ein): Mail kann schon angenommen sein
+        err = MailError("Versand abgebrochen, Verbindung verloren: %s" % _short(exc))
+        err.maybe_sent = True
+        raise err from exc
     finally:
         try:
             smtp.quit()

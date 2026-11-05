@@ -39,6 +39,16 @@
     setTimeout(function () { el.remove(); }, bad ? 7000 : 3500);
   }
   function fail(e) { toast(e && e.message ? e.message : String(e), true); }
+  var tipN = 0;
+  function tipBtn(html, cls, label) {
+    var id = 'tip-' + (++tipN);
+    return '<span class="tipw"><button type="button" class="tipbtn" aria-label="' + esc(label || 'Erklärung') + '" aria-describedby="' + id + '"><span aria-hidden="true">?</span></button><span role="tooltip" id="' + id + '" class="tip' + (cls ? ' ' + cls : '') + '">' + html + '</span></span>';
+  }
+  var GROUP_TIPS = {
+    credit: '<strong>Was sind Auskunfteien?</strong>Firmen wie Schufa, Creditreform oder CRIF speichern, wie zuverlässig du Rechnungen und Kredite bezahlst. Löschen lassen kann man dort kaum etwas, deshalb bittet Spurlos nur um Auskunft. Das kostet nichts und zeigt dir, ob Fehler in deiner Akte stehen. Die Auskunft kommt oft per Brief: Markier die Anfrage dann unter „Anfragen“ selbst als abgeschlossen.'
+  };
+  function etaText(days) { return days <= 0 ? 'heute' : days === 1 ? 'morgen' : 'in ' + days + ' Tagen'; }
+  var SEND_TIP = '<strong>Warum nicht alle auf einmal?</strong>Viele Mails in kurzer Zeit von einem neuen Absender sehen für Spamfilter wie Werbung aus. Dann landen deine Anfragen im Spam, und niemand liest sie. Spurlos verschickt sie deshalb einzeln, mit ein paar Minuten Abstand, zwischen 8 und 20 Uhr. Am ersten Tag sind es wenige, danach mehr.';
   var DAYS = ['So.', 'Mo.', 'Di.', 'Mi.', 'Do.', 'Fr.', 'Sa.'];
   function parseDate(s) {
     if (!s || !/^\d{4}-\d\d-\d\d/.test(s)) return null;
@@ -63,7 +73,12 @@
     return d ? pad(d.getDate()) + '.' + pad(d.getMonth() + 1) + '.' : '–';
   }
   function url(u) { return /^https?:\/\//i.test(String(u || '')) ? esc(u) : '#'; }
-  function pill(group, label) { return '<span class="pill g-' + esc(group) + '">' + esc(label) + '</span>'; }
+  function pill(group, label) {
+    var help = S.boot && S.boot.status_help && S.boot.status_help[label];
+    if (!help) return '<span class="pill g-' + esc(group) + '">' + esc(label) + '</span>';
+    return '<span class="tipw pillw"><span class="pill g-' + esc(group) + '" tabindex="0">' + esc(label) + '</span><span role="tooltip" class="tip start">' + esc(help) + '</span></span>';
+  }
+  var DONE_TIP = '<strong>Abgeschlossen</strong>Die Firma hat geantwortet und der Fall ist zu Ende: Sie hat deine Daten gelöscht, hatte keine Daten über dich, hat deinen Widerspruch bestätigt oder dir Auskunft gegeben (bei Auskunfteien). Dazu zählt auch, was du selbst als abgeschlossen markiert hast.';
   function langLabel(l) { return { de: 'Deutsch', ch: 'Deutsch (Schweiz)', en: 'Englisch' }[l] || 'Englisch'; }
   function groupLabel(g) { var m = S.boot.group_meta[g]; return m ? m.label : g; }
 
@@ -269,18 +284,25 @@
     var total = o.total || 0;
     var done = c.done || 0;
     var pct = total ? Math.round(done / total * 100) : 0;
-    var segs = [['done', 'Erledigt', '#1F8A5B'], ['wait', 'Wartet auf Antwort', '#3E6FE8'], ['todo', 'Zu tun', '#E07B24'],
-      ['overdue', 'Überfällig', '#C93A3A'], ['planned', 'Geplant', '#C9CED6'], ['missing', 'Kontakt fehlt', '#E3E6EB']];
-    var bar = segs.filter(function (s) { return c[s[0]]; }).map(function (s) {
-      return '<span style="flex:' + c[s[0]] + ';background:' + s[2] + '"></span>';
-    }).join('') || '<span style="flex:1;background:#E3E6EB"></span>';
-    var legend = segs.map(function (s) {
-      return '<span><i style="background:' + s[2] + '"></i>' + s[1] + ' <span class="mono muted">' + (c[s[0]] || 0) + '</span></span>';
-    }).join('');
     var outcomes = o.outcomes || {};
+    var oc = { deleted: outcomes.deleted || 0, no_data: outcomes.no_data || 0, access_only: outcomes.access_only || 0,
+      objection: outcomes.objection || 0 };
+    oc.other = Math.max(0, done - oc.deleted - oc.no_data - oc.access_only - oc.objection);
+    var segs = [['deleted', 'Daten gelöscht', '#1F8A5B', oc.deleted], ['no_data', 'Keine Daten', '#3FAF7E', oc.no_data],
+      ['objection', 'Widerspruch bestätigt', '#6CC79E', oc.objection], ['access_only', 'Auskunft erhalten', '#9ADBB9', oc.access_only],
+      ['other', 'Von dir abgeschlossen', '#C4EBD6', oc.other],
+      ['wait', 'Wartet auf Antwort', '#3E6FE8', c.wait || 0], ['todo', 'Zu tun', '#E07B24', c.todo || 0],
+      ['overdue', 'Frist abgelaufen', '#C93A3A', c.overdue || 0], ['planned', 'Versand geplant', '#C9CED6', c.planned || 0], ['missing', 'Kontakt fehlt', '#E3E6EB', c.missing || 0]];
+    var bar = segs.filter(function (s) { return s[3]; }).map(function (s) {
+      return '<span style="flex:' + s[3] + ';background:' + s[2] + '"></span>';
+    }).join('') || '<span style="flex:1;background:#E3E6EB"></span>';
+    var legend = segs.filter(function (s) { return s[3] || ['deleted', 'no_data', 'wait', 'todo', 'overdue', 'planned', 'missing'].indexOf(s[0]) >= 0; }).map(function (s) {
+      return '<span><i style="background:' + s[2] + '"></i>' + s[1] + ' <span class="mono muted">' + s[3] + '</span></span>';
+    }).join('');
     var errors = '';
     if (o.mailbox && o.mailbox.error) errors += '<div class="notice bad">' + I.warn + '<span><b>Postfach:</b> ' + esc(o.mailbox.error) + ' <a href="#/einstellungen/postfach">Postfach prüfen</a></span></div>';
     if (o.mailbox && o.mailbox.send_error) errors += '<div class="notice warn">' + I.warn + '<span><b>Versand:</b> ' + esc(o.mailbox.send_error) + '</span></div>';
+    if (o.busy) errors += '<div class="notice"><span class="spin"></span><span>Spurlos arbeitet gerade: ' + esc(o.busy) + '. Knöpfe reagieren so lange etwas verzögert.</span></div>';
     var todos = (o.todos || []).map(function (t) {
       return '<li><span class="num">' + t.n + '</span><div class="grow stack" style="gap:2px"><b style="font-weight:500">' + esc(t.title) + '</b><span class="small muted">' + esc(t.sub) + '</span></div>' +
         '<a class="btn sm" href="' + esc(t.href) + '">' + esc(t.cta) + '</a></li>';
@@ -298,13 +320,13 @@
       '<button class="btn" data-act="poll">' + I.refresh + '<span>Postfach abrufen</span></button><a class="btn p" href="#/anfragen">Alle Anfragen</a>') +
       errors +
       '<section class="card"><div class="row wrap between" style="align-items:flex-end"><div class="stack" style="gap:4px"><h2>Fortschritt</h2><p class="small muted" style="margin:0">' +
-      o.sent + ' von ' + total + ' Firmen angeschrieben · ' + done + ' abgeschlossen</p></div><div class="row" style="align-items:baseline;gap:6px"><span class="mono" style="font-size:32px;font-weight:500">' + pct + '<span style="font-size:20px">%</span></span><span class="small muted">erledigt</span></div></div>' +
+      o.sent + ' von ' + total + ' Firmen angeschrieben · ' + done + ' abgeschlossen</p></div><div class="row" style="align-items:baseline;gap:6px"><span class="mono" style="font-size:32px;font-weight:500">' + pct + '<span style="font-size:20px">%</span></span><span class="small muted">abgeschlossen</span>' + tipBtn(DONE_TIP, 'end', 'Was heißt abgeschlossen?') + '</div></div>' +
       '<div class="bar" role="img" aria-label="Verteilung der Anfragen">' + bar + '</div><div class="legend">' + legend + '</div></section>' +
       '<div class="grid-auto">' +
       kpi('Angeschrieben', o.sent, '/ ' + total, (c.planned || 0) + ' weitere sind geplant') +
       kpi('Antworten', o.replies, '', (o.inbox || 0) + ' davon musst du ansehen') +
-      kpi('Erledigt', done, '', (outcomes.deleted || 0) + ' gelöscht · ' + (outcomes.no_data || 0) + ' ohne Daten', '#166534') +
-      kpi('Überfällig', c.overdue || 0, '', 'Erinnerungen gehen automatisch raus', (c.overdue ? '#B91C1C' : '')) +
+      kpi('Abgeschlossen', done, '', oc.deleted + ' gelöscht · ' + oc.no_data + ' keine Daten · ' + oc.access_only + ' Auskunft' + (oc.objection ? ' · ' + oc.objection + ' Widerspruch' : ''), '#166534') +
+      kpi('Frist abgelaufen', c.overdue || 0, '', 'Erinnerungen gehen automatisch raus', (c.overdue ? '#B91C1C' : '')) +
       '</div>' +
       '<div class="cols"><section class="card"><div class="row between"><h2>Für dich zu tun</h2></div><ul class="list">' + todos + '</ul></section>' +
       '<section class="card"><div class="stack" style="gap:4px"><h2>Das macht Spurlos als Nächstes</h2><p class="small muted" style="margin:0">Automatisch, solange Spurlos läuft.</p></div><ol class="timeline">' + plan + '</ol></section></div>' +
@@ -329,9 +351,9 @@
   // ------------------------------------------------------------------ Eingang
   var CAT_ORDER = ['no_data', 'deleted', 'objection', 'access', 'id_request', 'clarify', 'confirm', 'webform', 'refused', 'unknown'];
   var NEXT = {
-    no_data: ['Als erledigt markieren. Es gibt nichts zu löschen.', 'Bestätigen: erledigt'],
-    deleted: ['Als erledigt markieren. Die Löschung ist bestätigt.', 'Bestätigen: erledigt'],
-    objection: ['Als erledigt markieren. Der Widerspruch ist vermerkt.', 'Bestätigen: erledigt'],
+    no_data: ['Als abgeschlossen markieren. Es gibt nichts zu löschen.', 'Bestätigen: abgeschlossen'],
+    deleted: ['Als abgeschlossen markieren. Die Löschung ist bestätigt.', 'Bestätigen: abgeschlossen'],
+    objection: ['Als abgeschlossen markieren. Der Widerspruch ist vermerkt.', 'Bestätigen: abgeschlossen'],
     access: ['Jetzt die Löschung anfordern. Spurlos schickt dafür eine kurze Mail.', 'Löschung anfordern'],
     id_request: ['Antworten, dass es keinen Grund für Zweifel an deiner Identität gibt. Einen Ausweis schickst du nur bei echten Zweifeln, und dann geschwärzt.', 'Antwort senden'],
     clarify: ['Antworten: Bitte alle genannten Angaben prüfen.', 'Antwort senden'],
@@ -344,10 +366,10 @@
     var items = S.inbox;
     var top = head((items ? items.length + (S.unassigned || []).length : '…') + ' Antworten warten auf dich', 'Eingang',
       '<button class="btn" data-act="poll">' + I.refresh + '<span>Postfach abrufen</span></button>');
-    var drop = '<div class="notice">' + I.info + '<span><b>Brief bekommen?</b> Das Einscannen von Briefen kommt in der nächsten Stufe. Bis dahin kannst du die Anfrage unter „Anfragen“ selbst als erledigt markieren.</span></div>';
+    var drop = '<div class="notice">' + I.info + '<span><b>Brief bekommen?</b> Das Einscannen von Briefen kommt in der nächsten Stufe. Bis dahin kannst du die Anfrage unter „Anfragen“ selbst als abgeschlossen markieren.</span></div>';
     if (!items) return top + '<div class="empty"><span class="spin"></span></div>';
     var un = renderUnassigned();
-    if (!items.length) return top + drop + un + (un ? '' : '<div class="card empty"><b>Alles erledigt.</b><span>Neue Antworten tauchen hier auf, sobald Spurlos sie im Postfach findet.</span></div>');
+    if (!items.length) return top + drop + un + (un ? '' : '<div class="card empty"><b>Nichts zu prüfen.</b><span>Neue Antworten tauchen hier auf, sobald Spurlos sie im Postfach findet.</span></div>');
     var sel = items.filter(function (i) { return i.id === S.ui.inboxSel; })[0] || items[0];
     S.ui.inboxSel = sel.id;
     var list = items.map(function (i) {
@@ -380,7 +402,7 @@
       return '<option value="' + k + '"' + (k === cat ? ' selected' : '') + '>' + esc(S.boot.categories[k]) + '</option>';
     }).join('');
     var nx = NEXT[cat] || NEXT.unknown;
-    if (cat === 'access' && sel.grp === 'credit') nx = ['Bei Auskunfteien reicht die Auskunft. Als erledigt markieren.', 'Bestätigen: erledigt'];
+    if (cat === 'access' && sel.grp === 'credit') nx = ['Bei Auskunfteien reicht die Auskunft. Als abgeschlossen markieren.', 'Bestätigen: abgeschlossen'];
     var detail = '<section class="card" aria-labelledby="det"><div class="row wrap between" style="align-items:flex-start"><div class="stack" style="gap:6px"><h2 id="det" style="font-size:20px">' + esc(sel.broker_name) + '</h2>' +
       '<div class="row wrap small muted" style="gap:8px"><span class="mono">' + esc(sel.ref) + '</span><span>·</span><span>' + esc(sel.from_addr) + '</span><span>·</span><span>' + fmtWhen(sel.date) + '</span>' + (sel.folder && sel.folder !== 'INBOX' ? '<span class="tag">aus dem Spam-Ordner</span>' : '') + '</div></div>' +
       '<span class="pill nodot g-done">' + I.ok + ' Zugeordnet</span></div>' +
@@ -437,7 +459,7 @@
     var cat = S.ui.inboxCat[id] || (item && item.category);
     busy(el, true);
     api('/api/inbox/' + id + '/confirm', { body: { category: cat } }).then(function (d) {
-      var msg = { done: 'Erledigt', erasure_sent: 'Löschung angefordert', id_reply_sent: 'Antwort gesendet', clarify_sent: 'Antwort gesendet',
+      var msg = { done: 'Abgeschlossen', erasure_sent: 'Löschung angefordert', id_reply_sent: 'Antwort gesendet', clarify_sent: 'Antwort gesendet',
         webform: 'Als „Formular offen“ markiert', complaint: 'Beschwerde-Text vorbereitet', confirmed: 'Vermerkt, Frist läuft weiter',
         waiting: 'Spurlos wartet weiter auf eine Antwort' }[d.next] || 'Übernommen';
       toast(msg);
@@ -447,13 +469,13 @@
   };
 
   // ------------------------------------------------------------------ Anfragen
-  var FILTERS = [['all', 'Alle', '#0E1116'], ['todo', 'Zu tun', '#E07B24'], ['wait', 'Wartet', '#3E6FE8'], ['overdue', 'Überfällig', '#C93A3A'],
-    ['done', 'Erledigt', '#1F8A5B'], ['planned', 'Geplant', '#9AA1AD'], ['missing', 'Kontakt fehlt', '#C9CED6']];
+  var FILTERS = [['all', 'Alle', '#0E1116'], ['todo', 'Zu tun', '#E07B24'], ['wait', 'Wartet', '#3E6FE8'], ['overdue', 'Frist abgelaufen', '#C93A3A'],
+    ['done', 'Abgeschlossen', '#1F8A5B'], ['planned', 'Versand geplant', '#9AA1AD'], ['missing', 'Kontakt fehlt', '#C9CED6']];
   function renderRequests() {
     var rows = S.requests;
     var top = head((S.overview ? S.overview.total + ' Firmen · ' + S.overview.sent + ' angeschrieben' : ''), 'Anfragen',
       '<div style="position:relative" class="row"><label for="q" class="sr">Firma oder Aktenzeichen suchen</label><input id="q" class="input" style="width:240px" type="search" placeholder="Firma oder Aktenzeichen" data-ui="reqSearch" data-rerender="1" value="' + esc(S.ui.reqSearch) + '"></div>' +
-      '<button class="btn" data-act="send-batch">' + I.send + '<span>Etappe jetzt senden</span></button>');
+      '<button class="btn" data-act="send-batch">' + I.send + '<span>Heutige Anfragen jetzt senden</span></button>');
     if (!rows) return top + '<div class="empty"><span class="spin"></span></div>';
     var counts = { all: rows.length };
     rows.forEach(function (r) { counts[r.group] = (counts[r.group] || 0) + 1; });
@@ -495,10 +517,10 @@
     var st = r.status;
     function btn(label, act, primary) { return '<button class="btn sm ' + (primary ? 'p' : '') + '" data-act="' + act + '" data-ref="' + esc(r.ref) + '">' + label + '</button>'; }
     if (st === 'planned') { acts.push(btn('Jetzt senden', 'req-send', true), btn('Text ansehen', 'req-preview'), btn('Auslassen', 'req-skip')); }
-    if (st === 'sent' || st === 'ack' || st === 'followup') { acts.push(btn('Jetzt erinnern', 'req-remind'), btn('Gesendete Anfrage', 'req-preview'), btn('Als erledigt markieren', 'req-done')); }
-    if (st === 'overdue' || st === 'reminded') { acts.push(btn('Beschwerde-Text', 'req-complaint', true), btn('Jetzt erinnern', 'req-remind'), btn('Als erledigt markieren', 'req-done')); }
-    if (st === 'complaint') { acts.push(btn('Beschwerde-Text', 'req-complaint', true), btn('Als erledigt markieren', 'req-done')); }
-    if (st === 'review') { acts.push('<a class="btn sm p" href="#/eingang">Im Eingang ansehen</a>', btn('Als erledigt markieren', 'req-done')); }
+    if (st === 'sent' || st === 'ack' || st === 'followup') { acts.push(btn('Jetzt erinnern', 'req-remind'), btn('Gesendete Anfrage', 'req-preview'), btn('Als abgeschlossen markieren', 'req-done')); }
+    if (st === 'overdue' || st === 'reminded') { acts.push(btn('Beschwerde-Text', 'req-complaint', true), btn('Jetzt erinnern', 'req-remind'), btn('Als abgeschlossen markieren', 'req-done')); }
+    if (st === 'complaint') { acts.push(btn('Beschwerde-Text', 'req-complaint', true), btn('Als abgeschlossen markieren', 'req-done')); }
+    if (st === 'review') { acts.push('<a class="btn sm p" href="#/eingang">Im Eingang ansehen</a>', btn('Als abgeschlossen markieren', 'req-done')); }
     if (st === 'webform') {
       if (b.webform) acts.push('<a class="btn sm p" href="' + url(b.webform) + '" target="_blank" rel="noopener">Formular öffnen ' + I.ext + '</a>');
       acts.push(btn('Text zum Einfügen', 'req-preview'), btn('Formular abgeschickt', 'req-webform-sent'));
@@ -534,7 +556,7 @@
   }
   ACT['req-send'] = function (el) { reqAction(el, 'send_now', {}, 'Anfrage gesendet'); };
   ACT['req-remind'] = function (el) { reqAction(el, 'remind', {}, 'Erinnerung gesendet'); };
-  ACT['req-done'] = function (el) { reqAction(el, 'done', {}, 'Als erledigt markiert'); };
+  ACT['req-done'] = function (el) { reqAction(el, 'done', {}, 'Als abgeschlossen markiert'); };
   ACT['req-reopen'] = function (el) { reqAction(el, 'reopen', {}, 'Wieder geöffnet'); };
   ACT['req-webform-sent'] = function (el) { reqAction(el, 'webform_sent', {}, 'Frist läuft ab heute'); };
   ACT['req-skip'] = function (el) { if (confirm('Diese Firma auslassen? Du kannst sie in der Händlerliste wieder einschalten.')) reqAction(el, 'skip', {}, 'Ausgelassen'); };
@@ -568,7 +590,7 @@
   ACT['send-batch'] = function (el) {
     busy(el, true);
     api('/api/send', { body: {} }).then(function (d) {
-      toast(d.sent ? d.sent + ' Anfragen gesendet' : (d.errors && d.errors.length ? d.errors[0] : 'Gerade ist nichts fällig'), !d.sent && d.errors && d.errors.length);
+      toast(d.sent ? d.sent + ' Anfragen gesendet' : (d.errors && d.errors.length ? d.errors[0] : 'Für heute ist alles verschickt'), !d.sent && d.errors && d.errors.length);
       return refreshData();
     }).then(render).catch(fail).then(function () { busy(el, false); });
   };
@@ -592,7 +614,7 @@
       var missing = inGroup.filter(function (b) { return b.contact === 'none'; }).length;
       var usHint = g === 'us' && S.boot.countries.indexOf('us') < 0 ? '<span class="tiny muted">Nur wenn du unter „Meine Daten“ USA angibst.</span>' : '';
       return '<div class="group-row"><button class="switch" role="switch" aria-checked="' + on + '" aria-label="' + esc(groupLabel(g)) + '" data-act="toggle-group" data-g="' + g + '"></button>' +
-        '<div class="grow stack" style="gap:2px"><b>' + esc(groupLabel(g)) + '</b><span class="small muted">' + esc(S.boot.group_meta[g].sub) + '</span>' + usHint + '</div>' +
+        '<div class="grow stack" style="gap:2px"><div class="row" style="gap:2px"><b>' + esc(groupLabel(g)) + '</b>' + (GROUP_TIPS[g] ? tipBtn(GROUP_TIPS[g], 'start') : '') + '</div><span class="small muted">' + esc(S.boot.group_meta[g].sub) + '</span>' + usHint + '</div>' +
         '<span class="mono small muted" style="text-align:right">' + inGroup.length + ' Firmen<br>' + withMail + ' per E-Mail' + (missing ? ' · ' + missing + ' ohne Kontakt' : '') + '</span></div>';
     }).join('');
     var tabs = [['all', 'Alle']].concat(S.boot.group_order.map(function (g) { return [g, groupLabel(g)]; }));
@@ -969,22 +991,23 @@
         var on = !!S.boot.groups[g];
         var mailN = inGroup.filter(function (b) { return b.contact === 'email'; }).length;
         if (on) { totalSel += inGroup.length; totalMail += mailN; }
-        return '<div class="group-row"><button class="switch" role="switch" aria-checked="' + on + '" aria-label="' + esc(groupLabel(g)) + '" data-act="toggle-group" data-g="' + g + '"></button><div class="grow stack" style="gap:2px"><b>' + esc(groupLabel(g)) + '</b><span class="small muted">' + esc(S.boot.group_meta[g].sub) + '</span></div><span class="mono small muted" style="text-align:right">' + inGroup.length + ' Firmen<br>' + mailN + ' per E-Mail</span></div>';
+        return '<div class="group-row"><button class="switch" role="switch" aria-checked="' + on + '" aria-label="' + esc(groupLabel(g)) + '" data-act="toggle-group" data-g="' + g + '"></button><div class="grow stack" style="gap:2px"><div class="row" style="gap:2px"><b>' + esc(groupLabel(g)) + '</b>' + (GROUP_TIPS[g] ? tipBtn(GROUP_TIPS[g], 'start') : '') + '</div><span class="small muted">' + esc(S.boot.group_meta[g].sub) + '</span></div><span class="mono small muted" style="text-align:right">' + inGroup.length + ' Firmen<br>' + mailN + ' per E-Mail</span></div>';
       }).join('');
     }
-    var s = S.draft.sending;
+    if (d && S.ui.etaFor !== totalMail) {
+      S.ui.etaFor = totalMail; S.ui.eta = null;
+      api('/api/estimate?n=' + totalMail).then(function (x) { S.ui.eta = x.days; render(); }).catch(function () {});
+    }
+    var etaLine = S.ui.eta == null ? 'Spurlos rechnet …' : (totalMail ? 'Alle ' + totalMail + ' Anfragen sind voraussichtlich <b>' + etaText(S.ui.eta) + '</b> verschickt.' : 'Keine Firma mit E-Mail-Adresse ausgewählt.');
     return '<div class="stack" style="gap:10px"><span class="eyebrow" style="color:var(--accent)">Schritt 5 von 5 · Start</span><h1>Welche Firmen soll Spurlos anschreiben?</h1>' +
       '<p class="lead">Die Liste richtet sich nach deinen Ländern (' + esc(S.boot.countries.map(function (c) { return S.boot.all_countries[c]; }).join(', ')) + '). Einzelne Firmen kannst du später in der Händlerliste ab- oder zuschalten.</p></div>' +
       '<section class="card">' + (d ? rows : '<div class="empty"><span class="spin"></span></div>') + (d ? '<div class="notice ok">' + I.info + '<span><b>' + totalSel + ' Firmen ausgewählt, ' + totalMail + ' davon per E-Mail.</b> Firmen ohne Mailadresse landen unter „Kontakt fehlt“ oder „Formular offen“, dort kannst du sie nachtragen.</span></div>' : '') + '</section>' +
-      '<section class="card"><h2>Versand</h2><div class="form-grid">' +
-      '<div class="field"><label for="pd">Anfragen pro Tag</label><input id="pd" class="input mono" type="number" min="1" max="50" data-send="per_day" value="' + esc(s.per_day) + '"><span class="hint">In Etappen, damit nichts im Spam landet.</span></div>' +
-      '<div class="field"><label for="st">Versand ab</label><input id="st" class="input mono" type="time" data-send="send_time" value="' + esc(s.send_time) + '"></div></div>' +
-      '<label class="check"><input type="checkbox" id="fbn" ' + (s.first_batch_now ? 'checked' : '') + ' data-send="first_batch_now"> Erste Etappe sofort senden</label></section>' +
+      '<section class="card"><div class="row" style="gap:2px"><h2>Versand</h2>' + tipBtn(SEND_TIP, 'start', 'Warum nicht alle auf einmal?') + '</div>' +
+      '<p style="margin:0">' + etaLine + '</p><span class="small muted">Die erste Anfrage geht sofort raus, die weiteren einzeln über den Tag verteilt. Du musst nichts einstellen.</span></section>' +
       '<section class="card"><div class="row wrap between"><div class="stack" style="gap:2px"><h2>So sieht deine Anfrage aus</h2><span class="small muted">Mit deinen Daten. Firmen in Deutschland und Österreich bekommen sie auf Deutsch, Schweizer Firmen nach Schweizer Recht, alle anderen auf Englisch.</span></div><div class="row wrap"><button class="btn sm" data-act="sample" data-lang="de">Deutsch</button>' + (S.boot.countries.indexOf('ch') >= 0 ? '<button class="btn sm" data-act="sample" data-lang="ch">Schweiz</button>' : '') + '<button class="btn sm" data-act="sample" data-lang="en">Englisch</button></div></div></section>' +
-      '<div class="notice warn">' + I.warn + '<span>Lass Spurlos geöffnet, solange es arbeiten soll. Es verschickt die Etappen und ruft das Postfach nur ab, während das Programm läuft. Was liegen bleibt, holt es beim nächsten Start nach.</span></div>' +
+      '<div class="notice warn">' + I.warn + '<span>Lass Spurlos geöffnet, solange es arbeiten soll. Es verschickt Anfragen und ruft das Postfach nur ab, während das Programm läuft. Schläft dein Mac oder ist Spurlos zu, holt es alles beim nächsten Start nach.</span></div>' +
       '<div class="row wrap between"><a class="btn" href="#/einrichtung/4">Zurück</a><button class="btn p" data-act="start">Anfragen starten</button></div>';
   }
-  document.addEventListener('change', function (e) { if (e.target.id === 'fbn' && S.draft) S.draft.sending.first_batch_now = e.target.checked; });
   ACT.sample = function (el) {
     var save = saveProfile().catch(function () { return null; });
     save.then(function () { return api('/api/sample?lang=' + el.dataset.lang); }).then(function (d) {
@@ -1008,16 +1031,47 @@
   };
   ACT.start = function (el) {
     busy(el, true);
-    var s = S.draft.sending;
-    api('/api/settings/sending', { body: { per_day: s.per_day, send_time: s.send_time, first_batch_now: s.first_batch_now } })
-      .then(function () { return api('/api/start', { body: {} }); })
-      .then(function (d) {
-        S.boot.setup_done = true; S.boot.started = true;
-        toast((d.created.email || 0) + ' Anfragen geplant. Die erste Etappe geht ' + (s.first_batch_now ? 'jetzt' : 'zur Versandzeit') + ' raus.');
-        go('#/uebersicht');
-        return refreshData();
-      }).then(render).catch(function (e) { busy(el, false); fail(e); });
+    api('/api/start', { body: {} }).then(function (d) {
+      S.boot.setup_done = true; S.boot.started = true;
+      return launchAnimation(d.created.email || 0);
+    }).then(function () {
+      go('#/uebersicht');
+      return refreshData();
+    }).then(render).catch(function (e) { busy(el, false); fail(e); });
   };
+  // Kurze Animation nach dem Start: Zähler läuft hoch, Briefe fliegen raus, erste Firma wird genannt.
+  function launchAnimation(total) {
+    return new Promise(function (resolve) {
+      var ov = document.createElement('div');
+      ov.className = 'launch';
+      ov.innerHTML = '<div class="launch-box"><div class="launch-sky"></div><div class="launch-n">0</div><div class="launch-t">Anfragen geplant</div><div class="launch-s">&nbsp;</div><button class="btn p" id="launch-go" style="visibility:hidden">Zur Übersicht</button></div>';
+      document.body.appendChild(ov);
+      var n = ov.querySelector('.launch-n'), sky = ov.querySelector('.launch-sky'), sub = ov.querySelector('.launch-s'), btn = ov.querySelector('#launch-go');
+      var start = performance.now(), dur = Math.min(2600, 600 + total * 14), lastEnv = 0;
+      function frame(t) {
+        var k = Math.min(1, (t - start) / dur), e = 1 - Math.pow(1 - k, 3);
+        n.textContent = Math.round(e * total);
+        if (t - lastEnv > 90 && k < 1) {
+          lastEnv = t;
+          var env = document.createElement('span'); env.className = 'env'; env.textContent = '✉';
+          env.style.left = (10 + Math.random() * 80) + '%'; env.style.animationDuration = (0.9 + Math.random() * 0.6) + 's';
+          sky.appendChild(env); setTimeout(function () { env.remove(); }, 1600);
+        }
+        if (k < 1) requestAnimationFrame(frame); else done();
+      }
+      function done() {
+        api('/api/overview').then(function (o) {
+          var first = (o.activity || []).filter(function (a) { return a.kind === 'sent'; })[0];
+          sub.innerHTML = (first ? 'Die erste Anfrage an <b>' + esc(first.name) + '</b> ist unterwegs.<br>' : '') +
+            'Alle ' + total + ' sind voraussichtlich ' + etaText(o.eta_days || 0) + ' verschickt.';
+        }).catch(function () { sub.textContent = 'Die erste Anfrage geht jetzt raus.'; }).then(function () {
+          btn.style.visibility = 'visible';
+        });
+      }
+      btn.addEventListener('click', function () { ov.remove(); resolve(); });
+      requestAnimationFrame(frame);
+    });
+  }
 
   // ------------------------------------------------------------------ Einstellungen
   var TABS = [['daten', 'Meine Daten'], ['postfach', 'Postfach'], ['ki', 'KI-Assistent'], ['fristen', 'Fristen & Versand'], ['vorlagen', 'Vorlagen'], ['sicherung', 'Daten & Sicherung'], ['ueber', 'Über Spurlos']];
@@ -1038,8 +1092,7 @@
     } else if (tab === 'fristen') {
       var s = S.draft.sending;
       body = '<section class="card"><div class="stack" style="gap:4px"><h2 style="font-size:19px">Fristen & Versand</h2><span class="small muted">Wie schnell Spurlos schreibt und wann es nachhakt.</span></div><div class="form-grid">' +
-        numField('per_day', 'Anfragen pro Tag', 'In Etappen, damit nichts im Spam landet.') +
-        '<div class="field"><label for="f-send_time">Versand ab</label><input id="f-send_time" class="input mono" type="time" data-send="send_time" value="' + esc(s.send_time) + '"></div>' +
+        '<div class="field" style="grid-column:1 / -1"><div class="row" style="gap:2px"><label>Versand</label>' + tipBtn(SEND_TIP, 'start', 'Warum nicht alle auf einmal?') + '</div><span class="hint">Spurlos verschickt die Anfragen einzeln zwischen 8 und 20 Uhr und steigert die Menge von Tag zu Tag. Das lässt sich nicht einstellen, damit nichts im Spam landet.</span></div>' +
         numField('reminder_days', 'Erinnerung nach (Tagen)', 'Firmen haben einen Monat Zeit für die Antwort.') +
         numField('complaint_days', 'Beschwerde-Text nach weiteren (Tagen)', 'Zählt ab der Erinnerung.') +
         numField('poll_minutes', 'Postfach abrufen alle (Minuten)', '') + '</div>' +
@@ -1057,6 +1110,7 @@
         '<li><div class="grow stack" style="gap:2px"><b style="font-weight:500">Speicherort</b><span class="small muted">Angaben, Anfragen, Verläufe</span></div><span class="mono small" style="word-break:break-all">' + esc(S.boot.data_dir) + '</span></li>' +
         '<li><div class="grow stack" style="gap:2px"><b style="font-weight:500">Sicherung exportieren</b><span class="small muted">Eine Datei mit allen Anfragen und Antworten. Passwörter sind nicht enthalten.</span></div><a class="btn sm" href="/api/export" data-act="export">Exportieren</a></li>' +
         '<li><div class="grow stack" style="gap:2px"><b style="font-weight:500">Einrichtung erneut öffnen</b><span class="small muted">Deine Daten bleiben erhalten.</span></div><a class="btn sm" href="#/einrichtung/1">Öffnen</a></li>' +
+        (window.pywebview ? '<li><div class="grow stack" style="gap:2px"><b style="font-weight:500">Protokoll</b><span class="small muted">Hilft bei Problemen. Enthält keine Passwörter.</span></div><button class="btn sm" data-act="open-log">Im Finder zeigen</button></li>' : '') +
         '<li><div class="grow stack" style="gap:2px"><b style="font-weight:500">Alle Daten löschen</b><span class="small muted">Entfernt alles von diesem Mac. Die Firmen behalten deine Anfragen.</span></div><button class="btn sm danger" data-act="reset">Löschen</button></li></ul></section>';
     } else {
       body = '<section class="card"><div class="row">' + LOGO + '<div class="stack" style="gap:2px"><h2 style="font-size:19px">Spurlos</h2><span class="mono small muted">Version ' + esc(S.boot.version) + '</span></div></div>' +
@@ -1081,6 +1135,18 @@
   };
   ACT['export'] = function (el) {
     busy(el, true);
+    var d0 = new Date();
+    var name = 'spurlos-sicherung-' + d0.getFullYear() + '-' + pad(d0.getMonth() + 1) + '-' + pad(d0.getDate()) + '-' + pad(d0.getHours()) + pad(d0.getMinutes()) + '.json';
+    if (window.pywebview && window.pywebview.api && window.pywebview.api.save_backup) {
+      // Im Programmfenster: Sichern-Dialog des Macs, mit echter Rückmeldung
+      fetch('/api/export', { headers: { 'X-Spurlos': '1' }, credentials: 'same-origin' }).then(function (r) {
+        if (!r.ok) throw new Error('Export fehlgeschlagen (' + r.status + ')');
+        return r.text();
+      }).then(function (text) { return window.pywebview.api.save_backup(text, name); }).then(function (path) {
+        toast(path ? 'Sicherung gespeichert: ' + path.split('/').pop() : 'Nicht gespeichert');
+      }).catch(fail).then(function () { busy(el, false); });
+      return;
+    }
     fetch('/api/export', { headers: { 'X-Spurlos': '1' }, credentials: 'same-origin' }).then(function (r) {
       if (!r.ok) throw new Error('Export fehlgeschlagen (' + r.status + ')');
       return r.blob();
@@ -1088,13 +1154,13 @@
       var a = document.createElement('a');
       var d = new Date();
       a.href = URL.createObjectURL(blob);
-      // Uhrzeit im Namen: im Programmfenster scheitert das Speichern still, wenn die Datei schon existiert
-      a.download = 'spurlos-sicherung-' + d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()) + '-' + pad(d.getHours()) + pad(d.getMinutes()) + '.json';
+      a.download = name;
       document.body.appendChild(a); a.click(); a.remove();
       setTimeout(function () { URL.revokeObjectURL(a.href); }, 5000);
-      toast(window.pywebview ? 'Wähle im Dialog, wo die Sicherung liegen soll.' : 'Sicherung gespeichert (Ordner „Downloads“)');
+      toast('Sicherung gespeichert (Ordner „Downloads“)');
     }).catch(fail).then(function () { busy(el, false); });
   };
+  ACT['open-log'] = function () { if (window.pywebview && window.pywebview.api) window.pywebview.api.open_log(); };
   ACT.reset = function () {
     var v = prompt('Wirklich alles löschen? Tippe LÖSCHEN ein.');
     if (v !== 'LÖSCHEN') return;
@@ -1123,6 +1189,14 @@
     if (window.pywebview && window.pywebview.api && window.pywebview.api.restart) window.pywebview.api.restart();
     else location.reload();
   };
+  // Im Programmfenster: Links nach draußen über die App öffnen (Standardbrowser), ohne das Fenster zu blockieren
+  document.addEventListener('click', function (e) {
+    var a = e.target.closest && e.target.closest('a[target="_blank"]');
+    if (!a || !window.pywebview || !window.pywebview.api || !window.pywebview.api.open_url) return;
+    if (!/^https?:\/\//i.test(a.href)) return;
+    e.preventDefault();
+    window.pywebview.api.open_url(a.href);
+  });
   // Fenster war im Hintergrund (Timer gedrosselt): beim Zurückholen sofort auffrischen
   document.addEventListener('visibilitychange', function () {
     if (document.visibilityState === 'visible' && S.boot && S.boot.setup_done) refreshData().then(render).catch(function () {});

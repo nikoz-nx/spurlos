@@ -7,6 +7,7 @@ import os
 import re
 import subprocess
 import sys
+import urllib.parse
 import urllib.request
 from pathlib import Path
 
@@ -349,7 +350,7 @@ def _apple_reason(reason: str) -> str:
 def _ask_apple(prompt: str) -> str:
     helper = _fm_helper()
     if helper:
-        out = subprocess.run([helper], input=prompt, capture_output=True, text=True, timeout=120)
+        out = subprocess.run([helper], input=prompt, capture_output=True, text=True, timeout=45)
         if out.returncode != 0:
             raise RuntimeError(_apple_reason((out.stderr or "").strip().replace("unavailable: ", "")))
         return out.stdout
@@ -369,10 +370,12 @@ def _ask_apple(prompt: str) -> str:
     return asyncio.run(run())
 
 
-def _post_json(url: str, payload: dict, headers: dict, timeout: int = 60) -> dict:
+def _post_json(url: str, payload: dict, headers: dict, timeout: int = 45) -> dict:
     req = urllib.request.Request(url, data=json.dumps(payload).encode("utf-8"),
                                  headers=dict({"Content-Type": "application/json"}, **headers), method="POST")
-    with _LOCAL_OPENER.open(req, timeout=timeout) as resp:
+    local = urllib.parse.urlparse(url).hostname in ("127.0.0.1", "localhost", "::1")
+    opener = _LOCAL_OPENER if local else urllib.request.build_opener()
+    with opener.open(req, timeout=timeout) as resp:
         return json.loads(resp.read().decode("utf-8"))
 
 
@@ -395,7 +398,7 @@ def _ask_ollama(prompt: str, cfg: dict) -> str:
         if not models:
             raise RuntimeError("In Ollama ist noch kein Modell installiert.")
         model = models[0]
-    data = _post_json(base + "/api/generate", {"model": model, "prompt": prompt, "stream": False, "format": "json"}, {}, 120)
+    data = _post_json(base + "/api/generate", {"model": model, "prompt": prompt, "stream": False, "format": "json"}, {}, 45)
     return data.get("response", "")
 
 
