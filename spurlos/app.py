@@ -562,9 +562,18 @@ def create_app() -> Flask:
     @app.post("/api/inbox/<int:mid>/confirm")
     def inbox_confirm(mid):
         category = body().get("category")
-        if category not in classify.CATEGORIES:
+        if category not in classify.CATEGORIES and category != "ack":
             return fail("Bitte eine Einordnung wählen.")
         result = engine.run_locked(engine.confirm_reply, mid, category)
+        return ok(**result)
+
+    @app.post("/api/inbox/<int:mid>/reply")
+    def inbox_reply(mid):
+        data = body()
+        kind = data.get("kind")
+        if kind not in ("custom", "resend"):
+            return fail("Unbekannte Aktion.")
+        result = engine.run_locked(engine.inbox_reply, mid, kind, str(data.get("text") or ""))
         return ok(**result)
 
     # ------------------------------------------------------------------ Daten

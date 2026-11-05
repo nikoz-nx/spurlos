@@ -537,7 +537,13 @@ def html_to_text(html: str) -> str:
     text = "".join(parser.parts)
     text = re.sub(r"[ \t\r\f\v]+", " ", text)
     text = re.sub(r"\n\s*\n\s*\n+", "\n\n", text)
-    return text.strip()
+    return _unescape(text.strip())
+
+
+def _unescape(text: str) -> str:
+    """Manche Mailprogramme schicken Text mit HTML-Zeichen (&lt; &amp;), auch im Klartextteil."""
+    import html as _html
+    return _html.unescape(text) if "&" in text else text
 
 
 def _decode(value) -> str:
@@ -556,7 +562,23 @@ def parse_message(raw: bytes) -> dict:
         part = msg.get_body(preferencelist=("plain", "html"))
         if part is not None:
             content = part.get_content()
-            body = html_to_text(content) if part.get_content_type() == "text/html" else content
+            body = html_to_text(content) if part.get_content_type() == "text/html" else _unescape(content)
+        if not (body or "").strip():
+            # Bevorzugter Teil leer (kommt vor): alle Textteile einsammeln
+            chunks = []
+            for p in msg.walk():
+                if p.is_multipart() or p.get_filename():
+                    continue
+                ct = p.get_content_type()
+                if ct in ("text/plain", "text/html"):
+                    try:
+                        c = p.get_content()
+                    except Exception:  # noqa: BLE001
+                        continue
+                    c = html_to_text(c) if ct == "text/html" else _unescape(c)
+                    if c.strip():
+                        chunks.append(c.strip())
+            body = "\n\n".join(chunks)
     except Exception:  # noqa: BLE001
         body = ""
     attachments = []

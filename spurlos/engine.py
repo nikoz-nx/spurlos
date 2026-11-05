@@ -62,6 +62,8 @@ STATUS_HELP = {
     "Löschung angefordert": "Die Firma hat Auskunft gegeben, Spurlos hat daraufhin die Löschung verlangt und wartet wieder.",
     "Antwort zum Ausweis gesendet": "Spurlos hat der Firma geantwortet, dass kein Ausweis nötig ist, und wartet wieder.",
     "Antwort gesendet": "Spurlos hat auf die Rückfrage geantwortet und wartet wieder auf die Firma.",
+    "Eigene Antwort gesendet": "Du hast der Firma selbst geschrieben. Spurlos wartet wieder auf eine Antwort, die Frist läuft neu.",
+    "Anfrage erneut gesendet": "Die ursprüngliche Anfrage ging noch einmal raus. Spurlos wartet wieder, die Frist läuft neu.",
 }
 
 _RUN_LOCK = threading.Lock()
@@ -350,9 +352,12 @@ def send_followup(ref: str, kind: str, body_override: str | None = None) -> None
     text_kind = kind
     if kind == "reminder" and _waiting_status(req) == "followup":
         text_kind = "reminder_followup"     # die Firma hat schon geantwortet, offen ist unser letztes Schreiben
-    subject, body = texts.followup_text(text_kind, lang, request_ctx(req, b))
-    if body_override:
-        body = body_override
+    if kind in ("custom", "resend"):
+        subject, body = _free_text(req, b, lang, kind, body_override or "")
+    else:
+        subject, body = texts.followup_text(text_kind, lang, request_ctx(req, b))
+        if body_override:
+            body = body_override
     last_in = db.query_one("SELECT from_addr, reply_to, message_id FROM messages WHERE request_id = ? AND direction = 'in' "
                            "AND kind = 'reply' ORDER BY id DESC LIMIT 1", (req["id"],))
     to = None
@@ -374,10 +379,39 @@ def send_followup(ref: str, kind: str, body_override: str | None = None) -> None
         db.event(req["id"], "reminder", "Erinnerung gesendet")
     else:
         labels = {"erasure": "Löschung angefordert", "id_reply": "Antwort zum Ausweis gesendet",
-                  "clarify": "Rückfrage beantwortet"}
+                  "clarify": "Rückfrage beantwortet", "custom": "Eigene Antwort gesendet", "resend": "Anfrage erneut gesendet"}
         _set(req["id"], status="followup", label=labels.get(kind, "Antwort gesendet"), due_at=_iso(due_from(now, b)),
              reminder_sent_at=None, reminder_due_at=None, last_message_id=msg_id)
         db.event(req["id"], "followup", labels.get(kind, "Antwort gesendet"))
+
+
+def _free_text(req: dict, b: dict, lang: str, kind: str, text: str) -> tuple:
+    """Betreff und Text für eine eigene Antwort oder das erneute Senden der Anfrage."""
+    first = db.query_one("SELECT subject, body, date FROM messages WHERE request_id = ? AND direction = 'out' AND kind = 'request' "
+                         "ORDER BY id LIMIT 1", (req["id"],))
+    en = lang == "en"
+    base_subject = (first or {}).get("subject") or ("Data subject request [%s]" % req["ref"] if en else "Datenschutz-Anfrage [%s]" % req["ref"])
+    subject = ("Re: " if en else "AW: ") + base_subject
+    if kind == "resend":
+        when = texts.fmt_date((first or {}).get("date") or db.now(), lang)
+        intro = ("Dear Sir or Madam,\n\nit seems my request of %s did not reach you in full. Here it is again:\n\n" % when) if en else \
+                ("Sehr geehrte Damen und Herren,\n\nmeine Anfrage vom %s ist bei Ihnen offenbar nicht vollständig angekommen. Hier noch einmal der Text:\n\n" % when)
+        original = (first or {}).get("body") or render_request(req, b)[1]
+        return subject, intro + "-----\n" + original
+    if not text.strip():
+        raise ValueError("Bitte einen Text eingeben.")
+    return subject, text.strip()
+
+
+def inbox_reply(message_id: int, kind: str, text: str = "") -> dict:
+    """Aus dem Eingang heraus antworten: eigener Text oder die Anfrage noch einmal schicken."""
+    msg = db.query_one("SELECT * FROM messages WHERE id = ?", (message_id,))
+    if not msg or not msg.get("request_id"):
+        raise ValueError("Nachricht nicht gefunden")
+    req = db.query_one("SELECT * FROM requests WHERE id = ?", (msg["request_id"],))
+    send_followup(req["ref"], kind, text)
+    db.execute("UPDATE messages SET reviewed = 1 WHERE id = ?", (message_id,))
+    return {"next": kind}
 
 
 def send_due(force: bool = False) -> dict:

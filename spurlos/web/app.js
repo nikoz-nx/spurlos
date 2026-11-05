@@ -492,6 +492,7 @@
     } else {
       excerpt = esc(full ? text : text.slice(0, 900) + (text.length > 900 ? ' …' : ''));
     }
+    if (!text.trim()) excerpt = '<span class="muted">Diese Mail enthält keinen lesbaren Text' + (sel.attachments ? ', nur Anhänge: ' + esc(sel.attachments) : '') + '. Schau im Postfach nach oder schick die Anfrage noch einmal.</span>';
     var options = CAT_ORDER.map(function (k) {
       return '<option value="' + k + '"' + (k === cat ? ' selected' : '') + '>' + esc(S.boot.categories[k]) + '</option>';
     }).join('');
@@ -509,7 +510,9 @@
       '<span style="font-size:15px;line-height:1.5;font-weight:500">' + esc(nx[0]) + '</span>' +
       (sel.link && (cat === 'confirm' || sel.category === 'confirm') ? '<div class="stack" style="gap:4px"><span class="label">Link aus der Mail</span><a class="mono small" style="word-break:break-all" href="' + url(sel.link) + '" target="_blank" rel="noopener noreferrer">' + esc(sel.link) + ' ' + I.ext + '</a></div>' : '') +
       '<div class="row wrap"><button class="btn p sm" data-act="inbox-confirm" data-id="' + sel.id + '">' + esc(nx[1]) + '</button>' +
-      '<a class="btn sm" href="#/anfragen" data-act="goto-req" data-ref="' + esc(sel.ref) + '">Anfrage ansehen</a></div>' +
+      '<a class="btn sm" href="#/anfragen" data-act="goto-req" data-ref="' + esc(sel.ref) + '">Anfrage ansehen</a>' +
+      '<button class="btn ghost sm" data-act="inbox-custom" data-id="' + sel.id + '">Eigene Antwort schreiben</button>' +
+      '<button class="btn ghost sm" data-act="inbox-resend" data-id="' + sel.id + '">Anfrage erneut senden</button></div>' +
       '<span class="tiny muted">Spurlos macht nichts, bevor du bestätigst.</span></div>' +
       '<div class="stack" style="gap:8px"><div class="row between"><span class="label">' + (full ? 'Ganze Antwort' : 'Auszug aus der Antwort') + '</span><button class="btn ghost sm" data-act="toggle-full">' + (full ? 'Nur Auszug zeigen' : 'Ganze Antwort zeigen') + '</button></div><p class="excerpt" data-keep="excerpt">' + excerpt + '</p>' +
       (sel.attachments ? '<span class="small muted">Anhänge: ' + esc(sel.attachments) + '</span>' : '') +
@@ -551,6 +554,30 @@
       toast('Mail ignoriert', false, { fn: function () { api('/api/inbox/' + id + '/unignore', { body: {} }).then(refreshData).then(render).catch(fail); } });
       return refreshData();
     }).then(render).catch(fail);
+  };
+  ACT['inbox-custom'] = function (el) {
+    var id = +el.dataset.id;
+    var item = (S.inbox || []).filter(function (i) { return i.id === id; })[0];
+    var en = item && item.lang === 'en';
+    var draft = (en ? 'Dear Sir or Madam,\n\n\n\nKind regards' : 'Sehr geehrte Damen und Herren,\n\n\n\nMit freundlichen Grüßen') + '\n' + ((S.boot.profile.first_name || '') + ' ' + (S.boot.profile.last_name || '')).trim();
+    openModal('<h2>Eigene Antwort an ' + esc(item ? item.broker_name : 'die Firma') + '</h2><p class="small muted" style="margin:0">Geht als Antwort auf diese Mail raus, mit dem Aktenzeichen ' + esc(item ? item.ref : '') + ' im Betreff. Danach wartet Spurlos wieder auf die Firma.</p>' +
+      '<div class="field"><label for="ct">Dein Text</label><textarea id="ct" class="input" style="min-height:220px">' + esc(draft) + '</textarea></div>' +
+      '<div class="row wrap"><button class="btn p" data-act="inbox-custom-send" data-id="' + id + '">Antwort senden</button><button class="btn" data-act="close-modal">Abbrechen</button></div>');
+    var ta = document.getElementById('ct'); if (ta) { ta.focus(); var pos = draft.indexOf('\n\n') + 2; ta.setSelectionRange(pos, pos); }
+  };
+  ACT['inbox-custom-send'] = function (el) {
+    var text = document.getElementById('ct').value;
+    if (!text.trim()) { showFieldError('ct', 'Bitte einen Text eingeben.'); return; }
+    busy(el, true);
+    api('/api/inbox/' + el.dataset.id + '/reply', { body: { kind: 'custom', text: text } }).then(function () {
+      closeModal(); toast('Antwort gesendet'); S.ui.inboxSel = null; return refreshData();
+    }).then(render).catch(function (e) { busy(el, false); fail(e); });
+  };
+  ACT['inbox-resend'] = function (el) {
+    var id = +el.dataset.id;
+    var item = (S.inbox || []).filter(function (i) { return i.id === id; })[0];
+    confirmModal('Anfrage erneut senden?', 'Spurlos schickt ' + esc(item ? item.broker_name : 'der Firma') + ' die ursprüngliche Anfrage noch einmal, als Antwort auf diese Mail. Die Frist beginnt neu.', 'Erneut senden',
+      function () { return api('/api/inbox/' + id + '/reply', { body: { kind: 'resend' } }).then(function () { toast('Anfrage erneut gesendet'); S.ui.inboxSel = null; return refreshData(); }).then(render); });
   };
   ACT['inbox-sel'] = function (el) { S.ui.inboxSel = +el.dataset.id; S.ui.fullText = false; render(); };
   ACT['toggle-full'] = function () { S.ui.fullText = !S.ui.fullText; render(); };
