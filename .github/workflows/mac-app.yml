@@ -1,0 +1,77 @@
+# Baut Spurlos.app auf einem Mac von GitHub.
+# - bei jeder Änderung: App bauen, prüfen und als Download im Lauf ablegen
+# - bei einem Versions-Tag (z. B. v0.1.6): zusätzlich eine öffentliche Veröffentlichung mit DMG
+name: Mac-App bauen
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Pakete installieren
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r packaging/requirements-app.txt
+
+      - name: Tests
+        run: |
+          python tests/test_classify.py
+          python -m spurlos.desktop --selftest
+
+      - name: Hilfsprogramm für Apple Intelligence bauen
+        continue-on-error: true
+        run: |
+          mkdir -p build-helper
+          xcrun swiftc -O -parse-as-library spurlos/helpers/spurlos_fm.swift -o build-helper/spurlos-fm
+
+      - name: App bauen
+        run: python -m PyInstaller --noconfirm --clean packaging/Spurlos.spec
+
+      - name: Hilfsprogramm einfügen und signieren
+        run: |
+          if [ -x build-helper/spurlos-fm ]; then cp build-helper/spurlos-fm dist/Spurlos.app/Contents/MacOS/; fi
+          codesign --force --deep --sign - dist/Spurlos.app
+          codesign --verify --deep --strict dist/Spurlos.app
+          lipo -info dist/Spurlos.app/Contents/MacOS/Spurlos
+
+      - name: Fertige App prüfen
+        run: dist/Spurlos.app/Contents/MacOS/Spurlos --selftest
+
+      - name: DMG erstellen
+        run: |
+          VERSION=$(python -c "import spurlos; print(spurlos.__version__)")
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          mkdir dmg
+          cp -R dist/Spurlos.app dmg/
+          ln -s /Applications dmg/Applications
+          hdiutil create -volname "Spurlos" -srcfolder dmg -ov -format UDZO "Spurlos-$VERSION.dmg"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Spurlos-${{ env.VERSION }}
+          path: Spurlos-*.dmg
+          retention-days: 30
+
+      - name: Veröffentlichen (nur bei Versions-Tag)
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" Spurlos-*.dmg \
+            --title "Spurlos $VERSION" \
+            --notes "Spurlos $VERSION für Macs mit Apple-Chip (M1 und neuer). Installation: DMG öffnen, Spurlos in den Ordner Programme ziehen. Beim ersten Start unter Systemeinstellungen › Datenschutz & Sicherheit auf „Dennoch öffnen“ klicken."

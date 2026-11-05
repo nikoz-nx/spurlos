@@ -292,9 +292,16 @@ def _excerpt(msg: dict, limit: int = 6000) -> str:
 
 
 def _fm_helper():
-    """Pfad zum kompilierten Hilfsprogramm (legt das Installationsprogramm an), sonst None."""
-    path = Path(sys.executable).parent / "spurlos-fm"
-    return str(path) if path.exists() and os.access(str(path), os.X_OK) else None
+    """Pfad zum kompilierten Hilfsprogramm, sonst None.
+
+    Terminal-Fassung: liegt neben Python in .venv/bin (legt das Installationsprogramm an).
+    Mac-App: liegt in Spurlos.app/Contents/MacOS neben dem Programm.
+    """
+    for folder in (Path(sys.executable).parent, Path(getattr(sys, "_MEIPASS", "") or sys.executable).parent):
+        path = folder / "spurlos-fm"
+        if path.exists() and os.access(str(path), os.X_OK):
+            return str(path)
+    return None
 
 
 def apple_status() -> tuple:

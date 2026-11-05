@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 
 from . import config
 
@@ -19,6 +20,15 @@ try:  # pragma: no cover - abhängig von der Umgebung
 except Exception:  # noqa: BLE001
     keyring = None
     KeyringError = Exception
+
+if keyring is not None and sys.platform == "darwin" and os.environ.get("SPURLOS_FILE_SECRETS") != "1":
+    # In der fertigen Mac-App findet keyring seine Bausteine nicht immer von selbst.
+    # Den Schlüsselbund fest einstellen, damit Passwörter nie in einer Datei landen.
+    try:  # pragma: no cover - nur auf dem Mac
+        from keyring.backends import macOS as _macos_backend
+        keyring.set_keyring(_macos_backend.Keyring())
+    except Exception:  # noqa: BLE001
+        pass
 
 
 def _fallback_path():
