@@ -399,7 +399,7 @@
       '<span class="small muted">' + (t.planned ? t.planned + ' weitere ' + (t.planned === 1 ? 'geht' : 'gehen') + ' heute noch raus' + (t.next ? ', die nächste ' + fmtWhenIn(t.next) : '') :
         (t.next ? 'Weiter geht es ' + fmtWhenIn(t.next) : (c.planned ? '' : 'Alle Anfragen sind verschickt'))) + '</span></div></section>';
     return head(esc(today) + (o.mailbox && o.mailbox.last_poll ? ' · zuletzt abgerufen ' + fmtWhen(o.mailbox.last_poll) : ''), 'Übersicht',
-      '<button class="btn" data-act="poll">' + I.refresh + '<span>Postfach abrufen</span></button><a class="btn p" href="#/anfragen">Alle Anfragen</a>') +
+      '<button class="btn" data-act="poll">' + I.refresh + '<span>Postfach abrufen</span></button><a class="btn p" href="#/anfragen">Zur Anfragenliste</a>') +
       errors + todayLine +
       '<section class="card"><div class="row wrap between" style="align-items:flex-end"><div class="stack" style="gap:4px"><h2>Fortschritt</h2><p class="small muted" style="margin:0">' +
       o.sent + ' von ' + total + ' Firmen angeschrieben · ' + done + ' abgeschlossen</p></div><div class="row" style="align-items:baseline;gap:6px"><span class="mono" style="font-size:32px;font-weight:500">' + pct + '<span style="font-size:20px">%</span></span><span class="small muted">abgeschlossen</span>' + tipBtn(DONE_TIP, 'end', 'Was heißt abgeschlossen?') + '</div></div>' +

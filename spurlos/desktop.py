@@ -315,13 +315,14 @@ def _run() -> int:
             return None
         _save_window_geometry(config, window)
         state["hidden"] = True
-        window.hide()
+        window.minimize()   # ins Dock, nicht weg: ein Klick aufs Symbol holt es zurück
         _first_hide_hint(engine)
         return False
 
     state["quit"] = False
     state["hidden"] = False
     _hook_quit(state)
+    _hook_reopen(window, state)
     _show_on_activate(window, state)
     window.events.closing += closing
     webview.start(func=start_server)
@@ -347,6 +348,38 @@ def _hook_quit(state: dict) -> None:
     cocoa.BrowserView.should_close = staticmethod(should_close)
 
 
+def _hook_reopen(window, state: dict) -> None:
+    """Klick aufs Dock-Symbol: Fenster zurückholen, auch wenn Spurlos schon die aktive App ist."""
+    try:
+        import objc
+        from webview.platforms import cocoa
+
+        def applicationShouldHandleReopen_hasVisibleWindows_(self, app, has_visible):
+            if not has_visible and not state.get("quit"):
+                _bring_back(window, state)
+            return True
+
+        sig = objc._C_NSBOOL + b"@:@" + objc._C_NSBOOL
+        objc.classAddMethods(cocoa.BrowserView.AppDelegate, [
+            objc.selector(applicationShouldHandleReopen_hasVisibleWindows_,
+                          selector=b"applicationShouldHandleReopen:hasVisibleWindows:", signature=sig)])
+    except Exception:  # noqa: BLE001
+        import logging
+        logging.getLogger("spurlos").warning("Dock-Reopen nicht verfügbar", exc_info=True)
+
+
+def _bring_back(window, state: dict) -> None:
+    state["hidden"] = False
+    try:
+        window.restore()
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        window.show()
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def _show_on_activate(window, state: dict) -> None:
     """Fenster wieder zeigen, wenn die App aktiv wird (Klick aufs Dock-Symbol, ⌘-Tab)."""
     try:
@@ -356,8 +389,7 @@ def _show_on_activate(window, state: dict) -> None:
         class Reopen(NSObject):
             def activated_(self, note):
                 if state.get("hidden") and not state.get("quit"):
-                    state["hidden"] = False
-                    window.show()
+                    _bring_back(window, state)
 
         state["_reopen"] = Reopen.alloc().init()
         NSNotificationCenter.defaultCenter().addObserver_selector_name_object_(

@@ -103,6 +103,7 @@ jobs:
           mkdir dmg
           cp -R dist/Spurlos.app dmg/
           ln -s /Applications dmg/Applications
+          cp packaging/erster-start.html "dmg/Erster Start – bitte lesen.html"
           hdiutil create -volname "Spurlos" -srcfolder dmg -ov -format UDZO "Spurlos-$VERSION.dmg"
 
       - uses: actions/upload-artifact@v4

@@ -15,12 +15,22 @@ Spurlos läuft nur auf deinem Mac. Es gibt keinen Server und kein Benutzerkonto.
 
 1. Die neueste **Spurlos-x.y.z.dmg** unter [Releases](https://github.com/nikoz-nx/spurlos/releases) herunterladen und öffnen.
 2. **Spurlos** in den Ordner **Programme** ziehen.
-3. Spurlos aus „Programme“ starten. macOS meldet beim ersten Mal, dass es die App nicht prüfen kann, weil sie nicht aus dem App Store kommt:
-   - Klick auf „Fertig“ (nicht „In den Papierkorb“).
-   - Öffne **Systemeinstellungen › Datenschutz & Sicherheit**, scroll nach unten und klick bei „Spurlos“ auf **Dennoch öffnen**.
-4. Beim ersten Start öffnet sich die Einrichtung in fünf Schritten.
+3. Spurlos aus „Programme“ starten. macOS zeigt eine Warnung, siehe nächster Abschnitt.
+4. Danach öffnet sich die Einrichtung in fünf Schritten.
 
 Fragt macOS später einmal nach dem Zugriff auf den Schlüsselbund, klick auf **„Immer erlauben“**. Spurlos liest nur seinen eigenen Eintrag, nicht deine anderen Passwörter.
+
+## Erster Start: die Warnung von macOS
+
+Beim ersten Öffnen sagt macOS „Spurlos nicht geöffnet“. Das ist normal bei Programmen, die nicht über Apples kostenpflichtiges Prüfprogramm laufen. So geht es weiter (die Anleitung liegt auch als Datei im Download):
+
+![Erster Start in drei Schritten](docs/erster-start.png)
+
+1. Meldung mit **Fertig** schließen (nicht „In den Papierkorb legen“).
+2. Apple-Menü → **Systemeinstellungen** → **Datenschutz & Sicherheit**, rechts ganz nach unten scrollen.
+3. Bei „Spurlos wurde blockiert“ auf **Dennoch öffnen** klicken, Mac-Passwort eingeben, noch einmal **Öffnen**.
+
+Das wiederholt sich einmal pro neu heruntergeladener Version. Dein gespeichertes Postfach-Passwort bleibt davon unberührt.
 
 ## Benutzen
 
