@@ -1101,14 +1101,23 @@
 
   // ------------------------------------------------------------------ Start
   render();
-  load().then(function () {
-    var r = route();
-    if (r.page === 'einstellungen' && r.arg) S.ui.setTab = r.arg;
-    if (r.page === 'anfragen' && r.q.f) S.ui.reqFilter = r.q.f;
-    return refreshData();
-  }).then(render).catch(function (e) {
-    $app.innerHTML = '<div class="empty"><b>Spurlos konnte nicht starten.</b><span>' + esc(e.message) + '</span></div>';
-  });
+  function boot(attempt) {
+    load().then(function () {
+      var r = route();
+      if (r.page === 'einstellungen' && r.arg) S.ui.setTab = r.arg;
+      if (r.page === 'anfragen' && r.q.f) S.ui.reqFilter = r.q.f;
+      return refreshData();
+    }).then(render).catch(function (e) {
+      // Netzwerkfehler (z. B. weil eine Rückfrage des Macs den Start aufgehalten hat): von selbst neu versuchen.
+      var retry = e instanceof TypeError && attempt < 20;
+      $app.innerHTML = '<div class="empty"><b>Spurlos konnte nicht starten.</b><span>' + esc(e.message) + '</span>' +
+        (retry ? '<span class="small muted">Spurlos versucht es gleich noch einmal …</span>' : '') +
+        '<button class="btn" data-act="reload">Erneut versuchen</button></div>';
+      if (retry) setTimeout(function () { boot(attempt + 1); }, 3000);
+    });
+  }
+  ACT.reload = function () { location.reload(); };
+  boot(0);
   setInterval(function () {
     if (!S.boot || !S.boot.setup_done) return;
     var a = document.activeElement;

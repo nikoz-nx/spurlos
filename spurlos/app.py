@@ -86,10 +86,12 @@ def create_app() -> Flask:
     # ------------------------------------------------------------------ Grundzustand
     @app.get("/api/bootstrap")
     def bootstrap():
+        # Nicht den Schlüsselbund lesen: Auf dem Mac kann das eine Rückfrage auslösen,
+        # und solange die offen ist, hinge der Start. Ein Merker in der Datenbank reicht.
         mb = db.get("mailbox")
-        mb["has_password"] = bool(secrets_store.get_secret("mailbox"))
+        mb["has_password"] = bool(mb.get("password_saved", mb.get("verified")))
         ai = db.get("ai")
-        ai["has_key"] = bool(secrets_store.get_secret("ai_cloud"))
+        ai["has_key"] = bool(ai.get("key_saved", ai.get("provider") == "cloud"))
         return ok(
             version=__version__,
             setup_done=db.get("setup_done"), setup_step=db.get("setup_step"), started=db.get("started"),
@@ -200,6 +202,7 @@ def create_app() -> Flask:
         cfg = _merge_mailbox(data)
         if data.get("password"):
             secrets_store.set_secret("mailbox", data["password"])
+            cfg["password_saved"] = True
         cfg["verified"] = bool(data.get("verified", cfg.get("verified")))
         db.put("mailbox", cfg)
         return ok()
@@ -231,6 +234,7 @@ def create_app() -> Flask:
                 cfg[key] = data[key]
         if data.get("api_key"):
             secrets_store.set_secret("ai_cloud", data["api_key"])
+            cfg["key_saved"] = True
         db.put("ai", cfg)
         return ok(ai=cfg)
 
