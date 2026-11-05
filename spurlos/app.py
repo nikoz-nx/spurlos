@@ -106,7 +106,7 @@ def create_app() -> Flask:
             states=sorted(brokers.authorities().keys()), secret_storage=secrets_store.storage_name(),
             status_help=engine.STATUS_HELP,
             data_dir=str(config.data_dir()), templates=texts.TEMPLATE_LIST,
-            categories={k: v["label"] for k, v in classify.CATEGORIES.items()},
+            categories=dict({k: v["label"] for k, v in classify.CATEGORIES.items()}, ack="Nur eine Eingangsbestätigung"),
         )
 
     @app.post("/api/profile")
@@ -398,11 +398,15 @@ def create_app() -> Flask:
             names = [r["broker_name"] for r in db.query(
                 "SELECT DISTINCT b.name AS broker_name FROM messages m JOIN requests r ON r.id = m.request_id "
                 "JOIN brokers b ON b.id = r.broker_id WHERE m.direction = 'in' AND m.kind = 'reply' AND m.reviewed = 0 LIMIT 5")]
-            todos.append({"n": inbox, "title": "Antworten prüfen", "sub": ", ".join(names), "href": "#/eingang", "cta": "Prüfen"})
+            todos.append({"n": inbox, "title": "Antworten prüfen", "sub": ", ".join(names), "href": "#/eingang", "cta": "Zum Eingang"})
+        # Webformulare erst zeigen, wenn die Mail-Anfragen laufen: nicht alles auf einmal am ersten Tag.
+        mails_running = counts["planned"] == 0 or engine._send_days_so_far() >= 2
         for status, title, cta in (("webform", "Webformulare ausfüllen", "Ansehen"),
                                    ("failed", "Zustellung fehlgeschlagen", "Ansehen"),
                                    ("complaint", "Beschwerde vorbereiten", "Ansehen")):
             items = [r for r in rows if r["status"] == status]
+            if status == "webform" and not mails_running:
+                continue
             if items:
                 todos.append({"n": len(items), "title": title, "sub": ", ".join(i["broker_name"] for i in items[:4]),
                               "href": "#/anfragen?f=todo", "cta": cta})
@@ -425,9 +429,9 @@ def create_app() -> Flask:
         due = db.query_one("SELECT r.due_at, b.name FROM requests r JOIN brokers b ON b.id = r.broker_id "
                            "WHERE r.status IN ('sent', 'ack', 'followup') AND r.due_at IS NOT NULL ORDER BY r.due_at LIMIT 1")
         if due:
-            plan.append({"when": due["due_at"], "title": "Nächste Frist: %s" % due["name"],
+            plan.append({"when": due["due_at"], "day": True, "title": "Nächste Frist: %s" % due["name"],
                          "sub": "Ohne Antwort geht automatisch eine Erinnerung raus" if sending.get("auto_remind") else "Dann bekommst du einen Hinweis"})
-        plan.append({"when": "wöchentlich", "title": "Händlerliste auf neue Firmen prüfen",
+        plan.append({"when": "wöchentlich", "title": "Firmenliste auf neue Einträge prüfen",
                      "sub": "Zuletzt: %s" % (db.get("last_broker_update") or "noch nie")})
         activity = db.query("SELECT e.at, e.kind, e.text, r.ref, r.status, r.label, r.outcome, b.name FROM events e "
                             "LEFT JOIN requests r ON r.id = e.request_id LEFT JOIN brokers b ON b.id = r.broker_id "
@@ -546,6 +550,12 @@ def create_app() -> Flask:
     def inbox_assign(mid):
         result = engine.run_locked(engine.assign_message, mid, body().get("ref") or None)
         return ok(**result)
+
+    @app.post("/api/inbox/<int:mid>/unignore")
+    def inbox_unignore(mid):
+        """„Ignorieren“ rückgängig machen: die Mail taucht wieder unter „Nicht zugeordnet“ auf."""
+        db.execute("UPDATE messages SET reviewed = 0, kind = 'unassigned' WHERE id = ? AND kind = 'ignored'", (mid,))
+        return ok()
 
     @app.post("/api/inbox/<int:mid>/confirm")
     def inbox_confirm(mid):

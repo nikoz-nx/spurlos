@@ -8,9 +8,12 @@ import sys
 import threading
 import time
 import calendar
+import logging
 from datetime import date, datetime, timedelta
 
 from . import brokers, classify, db, mail, secrets_store, texts
+
+log = logging.getLogger("spurlos.engine")
 
 STATUS = {
     "planned": ("planned", "Versand geplant"),
@@ -37,12 +40,12 @@ STATUS_HELP = {
     "Rückfrage beantwortet": "Die Firma hatte eine Rückfrage, zum Beispiel nach einem Ausweis. Spurlos hat geantwortet und wartet wieder.",
     "Antwort prüfen": "Spurlos ist sich bei einer Antwort nicht sicher. Schau sie dir im Eingang kurz an und bestätige, was die Firma meint.",
     "Formular nötig": "Diese Firma nimmt Anfragen nur über ein Formular auf ihrer Website an. Den Text zum Einfügen findest du bei der Anfrage.",
-    "Zustellung fehlgeschlagen": "Die E-Mail kam nicht an, die Adresse funktioniert nicht. Du kannst in der Händlerliste eine andere eintragen.",
+    "Zustellung fehlgeschlagen": "Die E-Mail kam nicht an, die Adresse funktioniert nicht. Du kannst in der Firmenliste eine andere eintragen.",
     "Beschwerde möglich": "Die Firma hat trotz Erinnerung nicht geantwortet. Der Text für eine kostenlose Beschwerde bei der Datenschutzbehörde liegt bereit.",
     "Frist abgelaufen": "Die Firma hat nach einem Monat nicht geantwortet. Spurlos schickt automatisch eine Erinnerung.",
     "Erinnerung verschickt": "Die Firma hat eine Erinnerung bekommen und noch eine kurze Nachfrist.",
     "Abgeschlossen": "Die Firma hat geantwortet, der Fall ist zu Ende.",
-    "Kontakt fehlt": "Für diese Firma ist keine Adresse bekannt. Du kannst eine in der Händlerliste nachtragen.",
+    "Kontakt fehlt": "Für diese Firma ist keine Adresse bekannt. Du kannst eine in der Firmenliste nachtragen.",
     "Brief nötig": "Diese Firma nimmt Anfragen nur per Post an. Das Drucken kommt in einer späteren Version.",
     "Keine Daten": "Die Firma hatte nichts über dich gespeichert.",
     "Daten gelöscht": "Die Firma hat deine Daten gelöscht.",
@@ -51,6 +54,14 @@ STATUS_HELP = {
     "Von dir abgeschlossen": "Du hast die Anfrage selbst als abgeschlossen markiert, zum Beispiel nach einem Brief.",
     "Formular abgeschickt": "Du hast das Webformular der Firma ausgefüllt. Spurlos überwacht ab jetzt die Frist.",
     "Link bestätigt": "Du hast den Bestätigungslink der Firma angeklickt. Spurlos wartet auf die eigentliche Antwort.",
+    "Ausweis verlangt": "Die Firma will einen Ausweis sehen. Schau im Eingang nach: Spurlos schlägt eine Antwort vor, ein Ausweis ist meist nicht nötig.",
+    "Rückfrage": "Die Firma hat eine Frage zu deiner Anfrage. Schau sie dir im Eingang an und bestätige die Antwort.",
+    "Verweis auf Webformular": "Die Firma möchte, dass du ihr Formular benutzt. Im Eingang kannst du das übernehmen.",
+    "Abgelehnt": "Die Firma lehnt deine Anfrage ab. Im Eingang kannst du eine Beschwerde vorbereiten lassen.",
+    "Bestätigungslink": "Die Firma will, dass du deine Anfrage über einen Link bestätigst. Im Eingang siehst du den Link.",
+    "Löschung angefordert": "Die Firma hat Auskunft gegeben, Spurlos hat daraufhin die Löschung verlangt und wartet wieder.",
+    "Antwort zum Ausweis gesendet": "Spurlos hat der Firma geantwortet, dass kein Ausweis nötig ist, und wartet wieder.",
+    "Antwort gesendet": "Spurlos hat auf die Rückfrage geantwortet und wartet wieder auf die Firma.",
 }
 
 _RUN_LOCK = threading.Lock()
@@ -305,7 +316,7 @@ def send_request(ref: str) -> None:
     if req["status"] not in ("planned", "failed"):
         raise mail.MailError("Die Anfrage an %s ist schon verschickt." % b.get("name"))
     if not b.get("active"):
-        raise mail.MailError("%s ist in der Händlerliste ausgeschaltet." % b.get("name"))
+        raise mail.MailError("%s ist in der Firmenliste ausgeschaltet." % b.get("name"))
     if not b.get("email"):
         raise mail.MailError("Für %s ist keine E-Mail-Adresse hinterlegt." % b.get("name"))
     subject, body = render_request(req, b)
@@ -561,7 +572,7 @@ def process_incoming(msg: dict) -> str | None:
     _extra_fields(mid, msg)
     label = classify.CATEGORIES[result["category"]]["label"]
     _set(req["id"], status="review",
-         label=label if result["category"] in ("id_request", "clarify", "webform", "refused", "confirm") else "Prüfen")
+         label=label if result["category"] in ("id_request", "clarify", "webform", "refused", "confirm") else None)
     db.event(req["id"], "reply", "Antwort erhalten: %s" % label)
     notify("Neue Antwort von %s" % b.get("name"))
     return "reply"
@@ -587,8 +598,10 @@ def poll() -> dict:
         db.put("last_poll_error", str(exc))
         return {"ok": False, "error": str(exc), "unreachable": isinstance(exc, mail.MailUnreachable)}
     except Exception as exc:  # noqa: BLE001
-        db.put("last_poll_error", "Abruf fehlgeschlagen: %s" % exc)
-        return {"ok": False, "error": "Abruf fehlgeschlagen: %s" % exc}
+        log.exception("Abruf fehlgeschlagen")
+        text = "Abruf fehlgeschlagen: %s" % mail.plain_error(str(exc))
+        db.put("last_poll_error", text)
+        return {"ok": False, "error": text}
     counts = {"reply": 0, "auto": 0, "bounce": 0, "unassigned": 0}
     for m in messages:
         kind = process_incoming(m)
@@ -689,6 +702,11 @@ def confirm_reply(message_id: int, category: str) -> dict:
         _set(req["id"], status="complaint", label=None)
         mark()
         return {"next": "complaint"}
+    if category == "ack":
+        _set(req["id"], status="ack" if _waiting_status(req) == "sent" else _waiting_status(req), label=None)
+        mark()
+        db.event(req["id"], "ack", "Eingangsbestätigung, Spurlos wartet auf die eigentliche Antwort")
+        return {"next": "ack"}
     if category == "confirm":
         _set(req["id"], status=_waiting_status(req), label="Link bestätigt")
         mark()
@@ -720,7 +738,7 @@ def assign_message(message_id: int, ref: str | None) -> dict:
                 result.get("ai_category"), result.get("ai_note"), message_id))
     label = classify.CATEGORIES[result["category"]]["label"]
     _set(req["id"], status="review",
-         label=label if result["category"] in ("id_request", "clarify", "webform", "refused", "confirm") else "Prüfen")
+         label=label if result["category"] in ("id_request", "clarify", "webform", "refused", "confirm") else None)
     db.event(req["id"], "reply", "Antwort zugeordnet: %s" % label)
     return {"next": "assigned"}
 
@@ -831,7 +849,7 @@ class Scheduler(threading.Thread):
             try:
                 self.tick()
             except Exception as exc:  # noqa: BLE001
-                db.put("last_send_error", "Hintergrund: %s" % str(exc)[:200])
+                db.put("last_send_error", mail.plain_error(str(exc)))
             self.stop_event.wait(60)
 
     def tick(self):
@@ -872,7 +890,7 @@ class Scheduler(threading.Thread):
         try:
             info = brokers.update_all()
             if info.get("incogni", {}).get("added"):
-                notify("Neue Firmen auf der Händlerliste")
+                notify("Neue Firmen auf der Firmenliste")
         except Exception:  # noqa: BLE001
             pass
         finally:

@@ -5,6 +5,7 @@ import email
 import email.policy
 import email.utils
 import imaplib
+import logging
 import re
 import smtplib
 import socket
@@ -17,6 +18,8 @@ from email.header import decode_header, make_header
 from email.message import EmailMessage
 from email.utils import formataddr, getaddresses, make_msgid, parsedate_to_datetime
 from html.parser import HTMLParser
+
+log = logging.getLogger("spurlos.mail")
 
 # Name, mit dem sich Spurlos beim Mailserver meldet. Ohne Angabe fragt Python den Mac
 # nach seinem Netzwerknamen: Das löst auf dem Mac die Frage nach „Geräten in lokalen
@@ -32,7 +35,8 @@ def _connect(host: str, port: int) -> socket.socket:
     try:
         infos = socket.getaddrinfo(host, port, 0, socket.SOCK_STREAM)
     except socket.gaierror as exc:
-        raise MailUnreachable("Der Server %s wurde nicht gefunden – besteht eine Internetverbindung? (%s)" % (host, exc)) from exc
+        log.debug("getaddrinfo %s: %s", host, exc)
+        raise MailUnreachable("Der Server %s wurde nicht gefunden. Prüfe die Schreibweise und die Internetverbindung." % host) from exc
     # IPv4 zuerst: funktioniert praktisch immer; IPv6 danach
     infos.sort(key=lambda i: 0 if i[0] == socket.AF_INET else 1)
     for family, kind, proto, _name, addr in infos:
@@ -47,7 +51,7 @@ def _connect(host: str, port: int) -> socket.socket:
             last = exc
             if sock is not None:
                 sock.close()
-    raise MailUnreachable("Der Server %s ist nicht erreichbar (%s)." % (host, last))
+    raise MailUnreachable("Der Server %s ist nicht erreichbar: %s." % (host, _short(last)))
 
 
 class _SMTP(smtplib.SMTP):
@@ -202,7 +206,7 @@ def connect_imap(cfg: dict, password: str) -> imaplib.IMAP4_SSL:
     except MailUnreachable:
         raise
     except (socket.gaierror, OSError) as exc:
-        raise MailUnreachable("Der Posteingangsserver %s ist nicht erreichbar (%s)." % (host, exc)) from exc
+        raise MailUnreachable("Der Posteingangsserver %s ist nicht erreichbar: %s." % (host, _short(exc))) from exc
     last = None
     for name in _login_names(cfg):
         try:
@@ -238,9 +242,9 @@ def connect_smtp(cfg: dict, password: str) -> smtplib.SMTP:
     except MailUnreachable:
         raise
     except (socket.gaierror, OSError) as exc:
-        raise MailUnreachable("Der Postausgangsserver %s ist nicht erreichbar (%s)." % (host, exc)) from exc
+        raise MailUnreachable("Der Postausgangsserver %s ist nicht erreichbar: %s." % (host, _short(exc))) from exc
     except smtplib.SMTPException as exc:
-        raise MailError("Der Postausgangsserver %s ist nicht erreichbar (%s)." % (host, exc)) from exc
+        raise MailError("Der Postausgangsserver %s ist nicht erreichbar: %s." % (host, _short(exc))) from exc
     last = None
     for name in _login_names(cfg):
         try:
@@ -259,13 +263,43 @@ def connect_smtp(cfg: dict, password: str) -> smtplib.SMTP:
 
 
 def _short(exc) -> str:
+    """Fehlertext in einfachen Worten. Der technische Text landet nur im Protokoll."""
     if exc is None:
         return "unbekannter Fehler"
     text = str(exc)
     if isinstance(exc, smtplib.SMTPResponseException):
         text = exc.smtp_error.decode("utf-8", "replace") if isinstance(exc.smtp_error, bytes) else str(exc.smtp_error)
     text = text.strip().strip("b'\"")
-    return text[:180]
+    log.debug("Mailfehler im Original: %s", text)
+    return plain_error(text)
+
+
+_PLAIN = [
+    (r"nodename nor servname|Name or service not known|getaddrinfo|Errno 8\b|Errno -2\b|Temporary failure in name resolution",
+     "der Servername wurde nicht gefunden. Prüfe die Schreibweise und die Internetverbindung"),
+    (r"timed out|Errno 60\b|Errno 110\b", "der Server hat nicht geantwortet. Vielleicht ist der Port falsch oder eine Firewall blockiert"),
+    (r"Connection refused|Errno 61\b|Errno 111\b", "der Server lehnt die Verbindung ab. Meist stimmt der Port nicht"),
+    (r"Network is unreachable|Errno 51\b|Errno 101\b", "keine Internetverbindung"),
+    (r"CERTIFICATE_VERIFY_FAILED|certificate verify failed", "das Sicherheitszertifikat des Servers wird nicht anerkannt. Stimmt der Servername?"),
+    (r"WRONG_VERSION_NUMBER|SSL: UNEXPECTED_EOF|ssl handshake|EOF occurred in violation",
+     "die Verschlüsselung passt nicht zum Port. Probier STARTTLS mit Port 587 oder SSL/TLS mit Port 465"),
+    (r"AUTHENTICATIONFAILED|Authentication failed|Invalid credentials|authentication failed|LOGIN failed|Username and Password not accepted|535",
+     "Benutzername oder Passwort stimmen nicht"),
+    (r"Application-specific password required|app password|app-specific", "dieser Anbieter verlangt ein App-Passwort statt des normalen Passworts"),
+    (r"IMAP (access|zugriff).*(disabled|deaktiviert|nicht aktiviert)|not enabled for IMAP|IMAP is disabled",
+     "der Zugriff per IMAP ist im Postfach noch nicht eingeschaltet"),
+    (r"Too many login|rate limit|try again later|temporarily", "der Server bittet um eine Pause. Versuch es in ein paar Minuten noch einmal"),
+    (r"Connection reset|Broken pipe|Errno 54\b|Errno 32\b|Connection unexpectedly closed", "die Verbindung wurde unterbrochen"),
+]
+
+
+def plain_error(text: str) -> str:
+    for pattern, plain in _PLAIN:
+        if re.search(pattern, text, re.I):
+            return plain
+    text = re.sub(r"\[Errno -?\d+\]\s*", "", text)
+    text = re.sub(r"^\(?\d{3}, ?b?['\"]?", "", text).strip("'\")() ")
+    return text[:140] or "unbekannter Fehler"
 
 
 # --------------------------------------------------------------------------- Versand

@@ -31,14 +31,20 @@
       return d;
     });
   }
-  function toast(msg, bad) {
+  function toast(msg, bad, undo) {
     var el = document.createElement('div');
-    if (bad) el.className = 'bad';
-    el.textContent = msg;
+    el.className = bad ? 'bad' : 'good';
+    el.innerHTML = '<span class="t-ico">' + (bad ? I.warn : I.ok) + '</span><span class="t-msg"></span>' +
+      (undo ? '<button type="button" class="t-undo">' + esc(undo.label || 'Rückgängig') + '</button>' : '') +
+      (bad ? '<button type="button" class="t-x" aria-label="Schließen">' + I.x + '</button>' : '');
+    el.querySelector('.t-msg').textContent = msg;
+    var timer = bad ? null : setTimeout(function () { el.remove(); }, undo ? 8000 : 3500);
+    if (bad) el.querySelector('.t-x').addEventListener('click', function () { el.remove(); });
+    if (undo) el.querySelector('.t-undo').addEventListener('click', function () { clearTimeout(timer); el.remove(); undo.fn(); });
+    while ($toast.children.length >= 3) $toast.firstChild.remove();
     $toast.appendChild(el);
-    setTimeout(function () { el.remove(); }, bad ? 7000 : 3500);
   }
-  function fail(e) { toast(e && e.message ? e.message : String(e), true); }
+  function fail(e) { if (e && e.field) return; toast(e && e.message ? e.message : String(e), true); }
   var tipN = 0;
   function tipBtn(html, cls, label) {
     var id = 'tip-' + (++tipN);
@@ -47,6 +53,7 @@
   var GROUP_TIPS = {
     credit: '<strong>Was sind Auskunfteien?</strong>Firmen wie Schufa, Creditreform oder CRIF speichern, wie zuverlässig du Rechnungen und Kredite bezahlst. Löschen lassen kann man dort kaum etwas, deshalb bittet Spurlos nur um Auskunft. Das kostet nichts und zeigt dir, ob Fehler in deiner Akte stehen. Die Auskunft kommt oft per Brief: Markier die Anfrage dann unter „Anfragen“ selbst als abgeschlossen.'
   };
+  function pl(n, one, many) { return n + ' ' + (n === 1 ? one : many); }
   function etaText(days) { return days <= 0 ? 'heute' : days === 1 ? 'morgen' : 'in ' + days + ' Tagen'; }
   var SEND_TIP = '<strong>Warum nicht alle auf einmal?</strong>Viele Mails in kurzer Zeit von einem neuen Absender sehen für Spamfilter wie Werbung aus. Dann landen deine Anfragen im Spam, und niemand liest sie. Spurlos verschickt sie deshalb einzeln, mit ein paar Minuten Abstand, zwischen 8 und 20 Uhr. Am ersten Tag sind es wenige, danach mehr.';
   var DAYS = ['So.', 'Mo.', 'Di.', 'Mi.', 'Do.', 'Fr.', 'Sa.'];
@@ -74,6 +81,17 @@
     return d ? pad(d.getDate()) + '.' + pad(d.getMonth() + 1) + '.' : '–';
   }
   function url(u) { return /^https?:\/\//i.test(String(u || '')) ? esc(u) : '#'; }
+  var REQ = ' <span class="req" aria-hidden="true">*</span><span class="sr">(Pflichtfeld)</span>';
+  function showFieldError(id, msg) {
+    var n = document.getElementById(id);
+    if (!n) return false;
+    n.classList.add('err');
+    var old = n.parentNode.querySelector('.field-err'); if (old) old.remove();
+    var e = document.createElement('span'); e.className = 'field-err'; e.textContent = msg; n.insertAdjacentElement('afterend', e);
+    n.focus(); n.addEventListener('input', function h() { n.classList.remove('err'); e.remove(); n.removeEventListener('input', h); });
+    return true;
+  }
+  function fieldError(id, msg) { var err = new Error(msg); err.field = showFieldError(id, msg); return Promise.reject(err); }
   function pill(group, label) {
     var help = S.boot && S.boot.status_help && S.boot.status_help[label];
     if (!help) return '<span class="pill g-' + esc(group) + '">' + esc(label) + '</span>';
@@ -102,6 +120,22 @@
   };
   var LOGO = '<svg width="28" height="28" viewBox="0 0 28 28" aria-hidden="true"><rect width="28" height="28" rx="8" fill="#1F2530"/><circle cx="7.5" cy="20" r="1.8" fill="#3DDCBF" opacity="0.3"/><circle cx="12.5" cy="15.5" r="2.1" fill="#3DDCBF" opacity="0.6"/><circle cx="18.5" cy="10" r="2.6" fill="#3DDCBF"/></svg>';
 
+  // Tooltips: in Tabellen (overflow) fest am Fenster positionieren, sonst werden sie abgeschnitten
+  function placeTip(w) {
+    var tip = w.querySelector('.tip');
+    if (!tip || !w.closest('.table-scroll, .excerpt, .modal')) return;
+    var r = w.getBoundingClientRect();
+    tip.style.position = 'fixed'; tip.style.transform = 'none'; tip.style.right = 'auto';
+    var width = Math.min(tip.offsetWidth || 260, window.innerWidth - 24);
+    var left = Math.max(12, Math.min(r.left, window.innerWidth - width - 12));
+    tip.style.left = left + 'px';
+    var h = tip.offsetHeight || 80;
+    if (r.bottom + 10 + h < window.innerHeight || r.top < h + 20) { tip.style.top = (r.bottom + 8) + 'px'; tip.style.bottom = 'auto'; }
+    else { tip.style.top = 'auto'; tip.style.bottom = (window.innerHeight - r.top + 8) + 'px'; }
+  }
+  document.addEventListener('mouseover', function (e) { var w = e.target.closest && e.target.closest('.tipw'); if (w) placeTip(w); });
+  document.addEventListener('focusin', function (e) { var w = e.target.closest && e.target.closest('.tipw'); if (w) placeTip(w); });
+
   // ------------------------------------------------------------------ Ereignisse
   var ACT = {};
   document.addEventListener('click', function (e) {
@@ -116,6 +150,7 @@
     var el = e.target;
     if (!el.dataset) return;
     var val = el.type === 'checkbox' ? el.checked : el.value;
+    if (el.dataset.p || el.dataset.list || el.dataset.m || el.dataset.pw !== undefined || el.dataset.state !== undefined || el.dataset.send) markDirty(el);
     if (el.dataset.p && S.draft) { S.draft.profile[el.dataset.p] = val; }
     if (el.dataset.list && S.draft) {
       var row = S.draft.profile[el.dataset.list][+el.dataset.i];
@@ -134,6 +169,30 @@
     if (el.dataset.send && S.draft) { S.draft.sending[el.dataset.send] = el.type === 'number' ? +val : val; }
     if (el.dataset.ai && S.draft) { S.draft.ai[el.dataset.ai] = val; }
   }
+  // Welche Einstellungs-Bereiche ungespeicherte Änderungen haben
+  S.dirty = {};
+  function markDirty(el) {
+    var k = el.dataset.send ? 'fristen' : (el.dataset.m || el.dataset.pw !== undefined) ? 'postfach' : 'daten';
+    if (!S.dirty[k]) { S.dirty[k] = true; var bar = document.getElementById('dirtybar'); if (bar) bar.hidden = false; else if (route().page === 'einstellungen') renderKeep(); }
+  }
+  function clearDirty(k) { delete S.dirty[k]; }
+  function dirtyBar() {
+    if (route().page !== 'einstellungen' || !Object.keys(S.dirty).length) return '';
+    var k = Object.keys(S.dirty)[0];
+    var act = { daten: 'save-profile', postfach: 'save-mailbox', fristen: 'save-sending' }[k];
+    var name = { daten: 'Meine Daten', postfach: 'Postfach', fristen: 'Fristen & Versand' }[k];
+    return '<div class="dirtybar" id="dirtybar"><span>' + I.warn + ' Änderungen unter „' + name + '“ sind noch nicht gespeichert.</span><div class="row"><button class="btn sm" data-act="discard-' + k + '">Verwerfen</button><button class="btn sm p" data-act="' + act + '">Speichern</button></div></div>';
+  }
+  ACT['discard-daten'] = ACT['discard-postfach'] = ACT['discard-fristen'] = function (el) {
+    var k = el.dataset.act.replace('discard-', '');
+    var keep = S.draft;
+    resetDraft();
+    if (k !== 'daten') { S.draft.profile = keep.profile; S.draft.state = keep.state; S.draft.countries = keep.countries; }
+    if (k !== 'postfach') { S.draft.mailbox = keep.mailbox; S.draft.password = keep.password; }
+    if (k !== 'fristen') { S.draft.sending = keep.sending; }
+    S.draft.ai = keep.ai;
+    clearDirty(k); render();
+  };
   function renderKeep() {
     var a = document.activeElement;
     var id = a && a.id;
@@ -147,14 +206,19 @@
 
   // ------------------------------------------------------------------ Modal
   function openModal(html) {
-    $modal.innerHTML = '<div class="modal-back" data-act="modal-back"><div class="modal" role="dialog" aria-modal="true">' + html + '</div></div>';
-    var f = $modal.querySelector('button, input, textarea, select');
+    $modal.innerHTML = '<div class="modal-back" data-act="modal-back"><div class="modal" role="dialog" aria-modal="true" tabindex="-1">' + html + '</div></div>';
+    var f = $modal.querySelector('input, textarea, select') || $modal.querySelector('.modal');
     if (f) f.focus();
   }
   function closeModal() { $modal.innerHTML = ''; }
   ACT['close-modal'] = closeModal;
   ACT['modal-back'] = function (el, e) { if (e.target === el) closeModal(); };
   document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && $modal.innerHTML) closeModal(); });
+  function confirmModal(title, text, okLabel, fn, danger) {
+    openModal('<h2>' + esc(title) + '</h2><p style="margin:0;line-height:1.55">' + text + '</p>' +
+      '<div class="row wrap"><button class="btn p' + (danger ? ' danger-p' : '') + '" data-act="confirm-ok">' + esc(okLabel) + '</button><button class="btn" data-act="close-modal">Abbrechen</button></div>');
+    ACT['confirm-ok'] = function (el) { busy(el, true); Promise.resolve(fn()).then(closeModal, function (e) { closeModal(); fail(e); }); };
+  }
   function textModal(title, sub, subject, text, extra) {
     openModal('<div class="row between"><h2>' + esc(title) + '</h2><button class="btn sm" data-act="close-modal">Schließen</button></div>' +
       (sub ? '<p class="small muted" style="margin:0">' + esc(sub) + '</p>' : '') +
@@ -234,6 +298,15 @@
   // ------------------------------------------------------------------ Rahmen
   function render() {
     if (!S.boot) { $app.innerHTML = '<div class="empty"><span class="spin"></span>Lädt …</div>'; return; }
+    // Scrollpositionen innerer Bereiche merken (Auszug, Tabellen, Liste im Eingang)
+    var keep = {};
+    $app.querySelectorAll('[data-keep]').forEach(function (n) { if (n.scrollTop || n.scrollLeft) keep[n.dataset.keep] = [n.scrollTop, n.scrollLeft]; });
+    var y = window.scrollY;
+    renderInner();
+    $app.querySelectorAll('[data-keep]').forEach(function (n) { var k = keep[n.dataset.keep]; if (k) { n.scrollTop = k[0]; n.scrollLeft = k[1]; } });
+    if (y) window.scrollTo(0, y);
+  }
+  function renderInner() {
     var r = route();
     if (!S.boot.setup_done || r.page === 'einrichtung') { $app.innerHTML = renderSetup(r); return; }
     var page = r.page || 'uebersicht';
@@ -244,13 +317,13 @@
     else if (page === 'haendler') body = renderBrokers();
     else if (page === 'einstellungen') body = renderSettings();
     else body = renderOverview();
-    $app.innerHTML = '<div class="layout">' + renderSide(page) + '<main class="main">' + body + '</main></div>';
+    $app.innerHTML = '<div class="layout">' + renderSide(page) + '<main class="main">' + body + dirtyBar() + '</main></div>';
   }
 
   function renderSide(page) {
     var o = S.overview || {};
     var mb = (o.mailbox || {});
-    var aiName = { none: 'Ohne KI', apple: 'Apple Intelligence', ollama: 'Lokales Modell', cloud: 'Cloud-KI' }[S.boot.ai.provider] || 'Ohne KI';
+    var aiName = { none: 'aus', apple: 'Apple Intelligence', ollama: 'Lokales Modell', cloud: 'Cloud-KI' }[S.boot.ai.provider] || 'aus';
     function a(id, href, icon, label, extra) {
       return '<a href="' + href + '" class="' + (page === id ? 'on' : '') + '">' + icon + '<span>' + label + '</span>' + (extra || '') + '</a>';
     }
@@ -260,15 +333,14 @@
       a('uebersicht', '#/uebersicht', I.grid, 'Übersicht') +
       a('eingang', '#/eingang', I.inbox, 'Eingang', o.inbox ? '<span class="badge">' + o.inbox + '</span>' : '') +
       a('anfragen', '#/anfragen', I.send, 'Anfragen', o.total ? '<span class="count">' + o.total + '</span>' : '') +
-      '<span class="navitem">' + I.printer + '<span>Briefe</span><span class="soon">bald</span></span>' +
-      a('haendler', '#/haendler', I.db, 'Händlerliste') +
-      '<span class="navitem">' + I.check + '<span>Weitere Spuren</span><span class="soon">bald</span></span>' +
+      a('haendler', '#/haendler', I.db, 'Firmenliste') +
       '</nav></div>' +
       '<div class="stack" style="gap:14px"><nav class="nav" style="margin:0">' + a('einstellungen', '#/einstellungen', I.sliders, 'Einstellungen') + '</nav>' +
       '<div class="status-box"><div class="row" style="gap:8px"><span class="dot' + (mb.ok === false ? ' bad' : '') + '"></span><span style="color:#E6E9EE;font-size:13px">' +
-      (mb.ok === false ? 'Postfach: Problem' : 'Postfach verbunden') + '</span></div>' +
+      (mb.ok === false ? 'Postfach: Problem' : o.busy ? 'Spurlos arbeitet …' : 'Postfach verbunden') + '</span></div>' +
       '<span class="addr">' + esc(mb.address || S.boot.mailbox.address || '') + '</span>' +
-      '<div class="row" style="gap:8px"><span class="ki-tag">KI</span><span>' + esc(aiName) + '</span></div>' +
+      (o.busy ? '<span class="tiny">' + esc(o.busy) + '</span>' : '') +
+      '<div class="row" style="gap:8px"><span class="ki-tag">KI</span><span>KI-Assistent: ' + esc(aiName) + '</span></div>' +
       '<div class="row" style="gap:8px;padding-top:10px;border-top:1px solid var(--side-line)">' + I.lock + '<span>Alle Daten bleiben auf diesem Mac</span></div></div></div></aside>';
   }
 
@@ -309,12 +381,12 @@
         '<a class="btn sm" href="' + esc(t.href) + '">' + esc(t.cta) + '</a></li>';
     }).join('') || '<li><span class="muted small">Gerade gibt es nichts zu tun. Spurlos meldet sich, sobald eine Antwort kommt.</span></li>';
     var plan = (o.plan || []).map(function (p) {
-      return '<li><div class="rail"><i></i><b></b></div><div class="tx"><span class="when">' + (parseDate(p.when) ? fmtWhen(p.when) : esc(p.when)) + '</span><b style="font-weight:500">' + esc(p.title) + '</b><span class="small muted">' + esc(p.sub).replace(/\d{4}-\d\d-\d\d \d\d:\d\d(:\d\d)?/g, function (m) { return fmtWhen(m); }) + '</span></div></li>';
+      return '<li><div class="rail"><i></i><b></b></div><div class="tx"><span class="when">' + (parseDate(p.when) ? fmtWhen(p.when, !!p.day) : esc(p.when)) + '</span><b style="font-weight:500">' + esc(p.title) + '</b><span class="small muted">' + esc(p.sub).replace(/\d{4}-\d\d-\d\d \d\d:\d\d(:\d\d)?/g, function (m) { return fmtWhen(m); }) + '</span></div></li>';
     }).join('');
     var act = (o.activity || []).map(function (a) {
       return '<li style="flex-wrap:wrap;gap:6px 16px"><span class="mono tiny muted" style="flex:0 0 112px">' + fmtWhen(a.at) + '</span>' +
         '<span class="grow" style="flex:1 1 220px">' + esc(a.name ? a.name + ': ' : '') + esc(a.text) + '</span>' +
-        (a.ref ? '<span class="mono tiny muted">' + esc(a.ref) + '</span>' : '') + (a.status ? pill(a.group, a.label) : '') + '</li>';
+        (a.ref ? '<span class="mono tiny muted">' + esc(a.ref) + '</span>' : '') + '</li>';
     }).join('') || '<li><span class="muted small">Noch keine Aktivität.</span></li>';
     var today = new Date().toLocaleDateString('de-DE', { weekday: 'long', day: 'numeric', month: 'long' });
     var t = o.today || {};
@@ -333,10 +405,10 @@
       o.sent + ' von ' + total + ' Firmen angeschrieben · ' + done + ' abgeschlossen</p></div><div class="row" style="align-items:baseline;gap:6px"><span class="mono" style="font-size:32px;font-weight:500">' + pct + '<span style="font-size:20px">%</span></span><span class="small muted">abgeschlossen</span>' + tipBtn(DONE_TIP, 'end', 'Was heißt abgeschlossen?') + '</div></div>' +
       '<div class="bar" role="img" aria-label="Verteilung der Anfragen">' + bar + '</div><div class="legend">' + legend + '</div></section>' +
       '<div class="grid-auto">' +
-      kpi('Angeschrieben', o.sent, '/ ' + total, (c.planned || 0) + ' weitere sind geplant') +
-      kpi('Antworten', o.replies, '', (o.inbox || 0) + ' davon musst du ansehen') +
+      kpi('Angeschrieben', o.sent, '/ ' + total, c.planned ? (c.planned === 1 ? '1 weitere ist geplant' : c.planned + ' weitere sind geplant') : 'Alle Anfragen sind raus') +
+      kpi('Antworten', o.replies, '', o.replies ? ((o.inbox || 0) + (o.inbox === 1 ? ' davon musst du ansehen' : ' davon musst du ansehen')) : 'Noch keine. Firmen haben einen Monat Zeit.') +
       kpi('Abgeschlossen', done, '', oc.deleted + ' gelöscht · ' + oc.no_data + ' keine Daten · ' + oc.access_only + ' Auskunft' + (oc.objection ? ' · ' + oc.objection + ' Widerspruch' : ''), '#166534') +
-      kpi('Frist abgelaufen', c.overdue || 0, '', 'Erinnerungen gehen automatisch raus', (c.overdue ? '#B91C1C' : '')) +
+      kpi('Frist abgelaufen', c.overdue || 0, '', c.overdue ? 'Erinnerungen gehen automatisch raus' : 'Bisher keine', (c.overdue ? '#B91C1C' : '')) +
       '</div>' +
       '<div class="cols"><section class="card"><div class="row between"><h2>Für dich zu tun</h2></div><ul class="list">' + todos + '</ul></section>' +
       '<section class="card"><div class="stack" style="gap:4px"><h2>Das macht Spurlos als Nächstes</h2><p class="small muted" style="margin:0">Automatisch, solange Spurlos läuft.</p></div><ol class="timeline">' + plan + '</ol></section></div>' +
@@ -348,7 +420,7 @@
   ACT.poll = function (el) {
     busy(el, true);
     api('/api/poll', { body: {} }).then(function (d) {
-      toast(d.fetched ? d.fetched + ' neue Nachrichten geprüft, ' + d.reply + ' Antworten zugeordnet' + (d.unassigned ? ', ' + d.unassigned + ' nicht zuordenbar' : '') : 'Keine neuen Nachrichten');
+      toast(d.fetched ? pl(d.fetched, 'neue Nachricht geprüft', 'neue Nachrichten geprüft') + ', ' + pl(d.reply, 'Antwort zugeordnet', 'Antworten zugeordnet') + (d.unassigned ? ', ' + d.unassigned + ' nicht zuordenbar' : '') : 'Keine neuen Nachrichten');
       return refreshData();
     }).then(render).catch(fail).then(function () { busy(el, false); });
   };
@@ -359,49 +431,61 @@
   }
 
   // ------------------------------------------------------------------ Eingang
-  var CAT_ORDER = ['no_data', 'deleted', 'objection', 'access', 'id_request', 'clarify', 'confirm', 'webform', 'refused', 'unknown'];
+  var CAT_ORDER = ['no_data', 'deleted', 'objection', 'access', 'id_request', 'clarify', 'confirm', 'ack', 'webform', 'refused', 'unknown'];
+  // Vorschlag je Einordnung: [Erklärung, Knopftext]
   var NEXT = {
-    no_data: ['Als abgeschlossen markieren. Es gibt nichts zu löschen.', 'Bestätigen: abgeschlossen'],
-    deleted: ['Als abgeschlossen markieren. Die Löschung ist bestätigt.', 'Bestätigen: abgeschlossen'],
-    objection: ['Als abgeschlossen markieren. Der Widerspruch ist vermerkt.', 'Bestätigen: abgeschlossen'],
-    access: ['Jetzt die Löschung anfordern. Spurlos schickt dafür eine kurze Mail.', 'Löschung anfordern'],
-    id_request: ['Antworten, dass es keinen Grund für Zweifel an deiner Identität gibt. Einen Ausweis schickst du nur bei echten Zweifeln, und dann geschwärzt.', 'Antwort senden'],
-    clarify: ['Antworten: Bitte alle genannten Angaben prüfen.', 'Antwort senden'],
-    webform: ['Die Firma will ihr Webformular. Die Anfrage wird als „Formular offen“ markiert.', 'Übernehmen'],
-    confirm: ['Die Firma möchte, dass du deine Anfrage über einen Link bestätigst. Öffne den Link nur, wenn die Mail wirklich von dieser Firma kommt. Danach hier bestätigen.', 'Link geöffnet, weiter warten'],
-    refused: ['Die Firma lehnt ab. Spurlos bereitet einen Beschwerde-Text vor.', 'Übernehmen'],
-    unknown: ['Bitte selbst lesen und unten einordnen. Passt nichts, wartet Spurlos weiter auf eine Antwort.', 'Weiter warten']
+    no_data: ['Die Firma hat nichts über dich gespeichert. Die Anfrage wird abgeschlossen.', 'Abschließen: keine Daten'],
+    deleted: ['Die Firma hat deine Daten gelöscht. Die Anfrage wird abgeschlossen.', 'Abschließen: gelöscht'],
+    objection: ['Die Firma nutzt deine Daten nicht mehr für Werbung. Die Anfrage wird abgeschlossen.', 'Abschließen: Widerspruch bestätigt'],
+    access: ['Die Firma hat Auskunft gegeben. Spurlos fordert jetzt per Mail die Löschung an.', 'Löschung anfordern'],
+    id_request: ['Die Firma verlangt einen Ausweis. Spurlos antwortet, dass es dafür keinen Grund gibt. Einen Ausweis schickst du nur bei echten Zweifeln, und dann geschwärzt.', 'Antwort senden'],
+    clarify: ['Die Firma hat eine Rückfrage. Spurlos antwortet: Bitte alle genannten Angaben prüfen.', 'Antwort senden'],
+    webform: ['Die Firma will ihr Webformular. Die Anfrage bekommt den Status „Formular nötig“, du findest sie dann unter „Zu tun“.', 'Übernehmen'],
+    confirm: ['Die Firma will, dass du deine Anfrage über einen Link bestätigst. Öffne den Link nur, wenn die Mail wirklich von dieser Firma kommt. Danach hier bestätigen.', 'Link geöffnet, weiter warten'],
+    ack: ['Nur eine Eingangsbestätigung, die eigentliche Antwort fehlt noch. Spurlos wartet weiter, die Frist läuft.', 'Weiter warten'],
+    refused: ['Die Firma lehnt ab. Spurlos bereitet einen Beschwerde-Text für die Datenschutzbehörde vor.', 'Beschwerde vorbereiten'],
+    unknown: ['Spurlos weiß nicht, was die Firma meint. Lies die Antwort und wähle oben aus, was zutrifft. Passt nichts, wartet Spurlos weiter.', 'Weiter warten']
   };
+  // Zitierte eigene Mail abschneiden: ab "Am … schrieb", "-----Original", "Von:" oder Zeilen mit ">"
+  function stripQuote(text) {
+    var t = String(text || '');
+    var cut = t.search(/\n\s*(>|Am .{6,80} schrieb|On .{6,80} wrote|-{3,}\s*(Original|Ursprüngliche)|Von: .*\n|From: .*\n|_{10,})/);
+    if (cut > 80) t = t.slice(0, cut).replace(/\s+$/, '') + '\n[…]';
+    return t;
+  }
   function renderInbox() {
     var items = S.inbox;
-    var top = head((items ? items.length + (S.unassigned || []).length : '…') + ' Antworten warten auf dich', 'Eingang',
+    var un = S.unassigned || [];
+    var n = items ? items.length + un.length : null;
+    var top = head(items ? (n ? pl(n, 'Antwort wartet auf dich', 'Antworten warten auf dich') : 'Nichts zu prüfen') : '…', 'Eingang',
       '<button class="btn" data-act="poll">' + I.refresh + '<span>Postfach abrufen</span></button>');
-    var drop = '<div class="notice">' + I.info + '<span><b>Brief bekommen?</b> Das Einscannen von Briefen kommt in der nächsten Stufe. Bis dahin kannst du die Anfrage unter „Anfragen“ selbst als abgeschlossen markieren.</span></div>';
     if (!items) return top + '<div class="empty"><span class="spin"></span></div>';
-    var un = renderUnassigned();
-    if (!items.length) return top + drop + un + (un ? '' : '<div class="card empty"><b>Nichts zu prüfen.</b><span>Neue Antworten tauchen hier auf, sobald Spurlos sie im Postfach findet.</span></div>');
+    var letter = S.overview && S.overview.sent ? '<p class="small muted" style="margin:0">' + I.info + ' Brief bekommen? Markier die Anfrage unter „Anfragen“ als abgeschlossen. Das Einscannen von Briefen kommt in einer späteren Version.</p>' : '';
+    if (!items.length) {
+      return top + (un.length ? '' : '<div class="card empty"><b>Nichts zu prüfen.</b><span>Neue Antworten tauchen hier auf, sobald Spurlos sie im Postfach findet.</span></div>') + renderUnassigned() + letter;
+    }
     var sel = items.filter(function (i) { return i.id === S.ui.inboxSel; })[0] || items[0];
     S.ui.inboxSel = sel.id;
     var list = items.map(function (i) {
       var sure = (i.confidence || 0) >= 0.75;
       return '<li><button class="item ' + (i.id === sel.id ? 'on' : '') + '" data-act="inbox-sel" data-id="' + i.id + '">' +
-        '<div class="row between" style="width:100%"><b>' + esc(i.broker_name) + '</b><span class="mono tiny muted">' + fmtWhen(i.date) + '</span></div>' +
+        '<div class="row between" style="width:100%"><b>' + esc(i.broker_name) + '</b><span class="mono tiny muted">' + fmtWhen(i.date, true) + '</span></div>' +
         '<div class="row wrap" style="gap:6px"><span class="ref">' + esc(i.ref) + '</span><span class="pill nodot ' + (sure ? 'g-done' : 'g-todo') + '">' + esc(i.category_label) + '</span></div></button></li>';
     }).join('');
     var cat = S.ui.inboxCat[sel.id] || sel.category;
     var conf = sel.confidence || 0;
-    var n = conf >= 0.75 ? 3 : conf >= 0.5 ? 2 : 1;
-    var segColor = n === 3 ? '#1F8A5B' : n === 2 ? '#E0A324' : '#E07B24';
-    var segs = [0, 1, 2].map(function (k) { return '<i style="background:' + (k < n ? segColor : '') + '"></i>'; }).join('');
-    var text = sel.body || '';
+    var lvl = conf >= 0.75 ? 3 : conf >= 0.5 ? 2 : 1;
+    var segColor = lvl === 3 ? '#1F8A5B' : lvl === 2 ? '#E0A324' : '#E07B24';
+    var segs = [0, 1, 2].map(function (k) { return '<i style="background:' + (k < lvl ? segColor : '') + '"></i>'; }).join('');
+    var full = S.ui.fullText;
+    var text = full ? (sel.body || '') : stripQuote(sel.body || '');
     var m = sel.match_text || '';
     var excerpt;
-    var full = S.ui.fullText;
     if (m && text.indexOf(m) >= 0 && !full) {
       var at = text.indexOf(m);
       var start = Math.max(0, text.lastIndexOf('\n', Math.max(0, at - 300)));
       var end = Math.min(text.length, at + m.length + 400);
-      excerpt = (start > 0 ? '… ' : '') + esc(text.slice(start, at).trim() ? text.slice(start, at) : '') + '<mark>' + esc(m) + '</mark>' + esc(text.slice(at + m.length, end)) + (end < text.length ? ' …' : '');
+      excerpt = (start > 0 ? '… ' : '') + esc(text.slice(start, at)) + '<mark>' + esc(m) + '</mark>' + esc(text.slice(at + m.length, end)) + (end < text.length ? ' …' : '');
     } else if (m && text.indexOf(m) >= 0) {
       var at2 = text.indexOf(m);
       excerpt = esc(text.slice(0, at2)) + '<mark>' + esc(m) + '</mark>' + esc(text.slice(at2 + m.length));
@@ -412,24 +496,27 @@
       return '<option value="' + k + '"' + (k === cat ? ' selected' : '') + '>' + esc(S.boot.categories[k]) + '</option>';
     }).join('');
     var nx = NEXT[cat] || NEXT.unknown;
-    if (cat === 'access' && sel.grp === 'credit') nx = ['Bei Auskunfteien reicht die Auskunft. Als abgeschlossen markieren.', 'Bestätigen: abgeschlossen'];
+    if (cat === 'access' && sel.grp === 'credit') nx = ['Bei Auskunfteien reicht die Auskunft, gelöscht wird dort nichts. Die Anfrage wird abgeschlossen.', 'Abschließen: Auskunft erhalten'];
+    var unsure = sel.category === 'unknown' || lvl === 1;
+    var guess = sel.ai_label && sel.ai_category !== sel.category ? '<span class="small">Die KI meint: <b>' + esc(sel.ai_label) + '</b>' + (sel.ai_note ? ' – ' + esc(sel.ai_note) : '') + '</span>' : '';
     var detail = '<section class="card" aria-labelledby="det"><div class="row wrap between" style="align-items:flex-start"><div class="stack" style="gap:6px"><h2 id="det" style="font-size:20px">' + esc(sel.broker_name) + '</h2>' +
       '<div class="row wrap small muted" style="gap:8px"><span class="mono">' + esc(sel.ref) + '</span><span>·</span><span>' + esc(sel.from_addr) + '</span><span>·</span><span>' + fmtWhen(sel.date) + '</span>' + (sel.folder && sel.folder !== 'INBOX' ? '<span class="tag">aus dem Spam-Ordner</span>' : '') + '</div></div>' +
-      '<span class="pill nodot g-done">' + I.ok + ' Zugeordnet</span></div>' +
-      '<div class="stack" style="gap:8px"><span class="label">' + (full ? 'Ganze Antwort' : 'Auszug aus der Antwort') + '</span><p class="excerpt">' + excerpt + '</p>' +
-      (sel.attachments ? '<span class="small muted">Anhänge: ' + esc(sel.attachments) + '</span>' : '') + '</div>' +
-      '<div class="cols"><div class="card" style="padding:18px;gap:12px"><span class="label">Erkannt als</span><div class="stack" style="gap:2px"><span style="font-size:18px;font-weight:600">' + esc(sel.category_label) + '</span></div>' +
-      '<div class="row"><span class="segs" aria-hidden="true">' + segs + '</span><span class="small" style="font-weight:500;color:' + (n === 3 ? '#166534' : '#9A3412') + '">' + (n === 3 ? 'Sicher' : n === 2 ? 'Ziemlich sicher' : 'Unsicher') + '</span></div>' +
-      '<div class="stack" style="gap:6px;padding-top:10px;border-top:1px solid var(--line-3)"><div class="row small" style="align-items:flex-start;gap:8px;color:var(--ink-2)"><span class="tag">Regel</span><span>' + esc(sel.rule || '') + '</span></div>' +
-      (sel.ai_note ? '<div class="row small" style="align-items:flex-start;gap:8px;color:var(--ink-2)"><span class="tag ki">KI</span><span>' + esc((sel.ai_label ? sel.ai_label + ': ' : '') + sel.ai_note) + '</span></div>' : '') + '</div></div>' +
-      '<div class="suggest"><span class="label" style="color:var(--accent)">Vorschlag</span><span style="font-size:15px;line-height:1.5;font-weight:500">' + esc(nx[0]) + '</span>' +
-      '<div class="field"><label for="cat">Einordnung</label><select id="cat" class="input" data-act-select="1">' + options + '</select></div>' +
+      '<div class="stack" style="gap:4px;align-items:flex-end"><div class="row" style="gap:8px"><span class="label">Erkannt als</span><span class="pill nodot ' + (lvl === 3 ? 'g-done' : 'g-todo') + '">' + esc(sel.category_label) + '</span></div>' +
+      '<div class="row" style="gap:8px"><span class="segs" aria-hidden="true">' + segs + '</span><span class="tiny" style="font-weight:500;color:' + (lvl === 3 ? '#166534' : '#9A3412') + '">' + (lvl === 3 ? 'sicher' : lvl === 2 ? 'ziemlich sicher' : 'unsicher') + '</span></div></div></div>' +
+      '<div class="suggest' + (unsure ? ' unsure' : '') + '"><div class="row wrap between" style="align-items:flex-start"><span class="label" style="color:var(--accent)">' + (unsure ? 'Bitte einordnen' : 'Vorschlag') + '</span></div>' +
+      '<div class="field"><label for="cat">Was meint die Firma?</label><select id="cat" class="input" data-act-select="1">' + options + '</select></div>' +
+      guess +
+      '<span style="font-size:15px;line-height:1.5;font-weight:500">' + esc(nx[0]) + '</span>' +
       (sel.link && (cat === 'confirm' || sel.category === 'confirm') ? '<div class="stack" style="gap:4px"><span class="label">Link aus der Mail</span><a class="mono small" style="word-break:break-all" href="' + url(sel.link) + '" target="_blank" rel="noopener noreferrer">' + esc(sel.link) + ' ' + I.ext + '</a></div>' : '') +
       '<div class="row wrap"><button class="btn p sm" data-act="inbox-confirm" data-id="' + sel.id + '">' + esc(nx[1]) + '</button>' +
-      '<a class="btn sm" href="#/anfragen" data-act="goto-req" data-ref="' + esc(sel.ref) + '">Anfrage ansehen</a></div></div></div>' +
-      '<div class="row wrap between" style="padding-top:12px;border-top:1px solid var(--line-3)"><span class="small muted">Spurlos macht nichts, bevor du bestätigst.</span>' +
-      '<button class="btn ghost sm" data-act="toggle-full">' + (full ? 'Nur Auszug zeigen' : 'Ganze Antwort zeigen') + '</button></div></section>';
-    return top + drop + un + '<div class="split"><ul class="left list" style="display:flex;flex-direction:column;gap:10px" aria-label="Antworten">' + list.replace(/<li>/g, '<li style="border:none;padding:0">') + '</ul><div class="right">' + detail + '</div></div>';
+      '<a class="btn sm" href="#/anfragen" data-act="goto-req" data-ref="' + esc(sel.ref) + '">Anfrage ansehen</a></div>' +
+      '<span class="tiny muted">Spurlos macht nichts, bevor du bestätigst.</span></div>' +
+      '<div class="stack" style="gap:8px"><div class="row between"><span class="label">' + (full ? 'Ganze Antwort' : 'Auszug aus der Antwort') + '</span><button class="btn ghost sm" data-act="toggle-full">' + (full ? 'Nur Auszug zeigen' : 'Ganze Antwort zeigen') + '</button></div><p class="excerpt" data-keep="excerpt">' + excerpt + '</p>' +
+      (sel.attachments ? '<span class="small muted">Anhänge: ' + esc(sel.attachments) + '</span>' : '') +
+      '<details class="small muted"><summary>Woran Spurlos das erkannt hat</summary><div class="stack" style="gap:4px;padding-top:6px"><span>' + esc(sel.rule || 'Keine passende Formulierung gefunden.') + '</span>' +
+      (sel.ai_note ? '<span><span class="tag ki">KI</span> ' + esc((sel.ai_label ? sel.ai_label + ': ' : '') + sel.ai_note) + '</span>' : '') + '</div></details></div></section>';
+    return top + '<div class="split"><ul class="left list" style="display:flex;flex-direction:column;gap:10px" aria-label="Antworten">' + list.replace(/<li>/g, '<li style="border:none;padding:0">') + '</ul><div class="right">' + detail + '</div></div>' +
+      renderUnassigned() + letter;
   }
   document.addEventListener('change', function (e) {
     if (e.target.id === 'cat' && S.ui.inboxSel) { S.ui.inboxCat[S.ui.inboxSel] = e.target.value; render(); }
@@ -440,25 +527,30 @@
     var opts = '<option value="">Anfrage wählen …</option>' + (S.targets || []).map(function (t) {
       return '<option value="' + esc(t.ref) + '">' + esc(t.name) + ' · ' + esc(t.ref) + '</option>';
     }).join('');
-    return '<section class="card"><div class="stack" style="gap:4px"><h2>Nicht zugeordnet</h2><p class="small muted" style="margin:0">Diese Mails konnte Spurlos keiner Anfrage sicher zuordnen. Ordne sie zu, dann geht es normal weiter.</p></div><ul class="list">' +
+    return '<section class="card"><div class="stack" style="gap:4px"><h2>' + pl(list.length, 'Mail ohne Zuordnung', 'Mails ohne Zuordnung') + '</h2><p class="small muted" style="margin:0">Diese Mails passen zu keiner Anfrage, meist fehlt das Aktenzeichen. Gehört eine dazu, wähle die Firma aus. Werbung oder Fehlläufer kannst du ignorieren.</p></div><ul class="list">' +
       list.map(function (m) {
+        var body = stripQuote(m.body || '');
         return '<li style="flex-wrap:wrap;gap:8px 14px;align-items:flex-start"><div class="grow stack" style="gap:4px;flex:1 1 320px;min-width:0"><b style="font-weight:500">' + esc(m.subject || '(ohne Betreff)') + '</b>' +
           '<span class="small muted">' + esc(m.from_addr) + ' · ' + fmtWhen(m.date) + (m.folder && m.folder !== 'INBOX' ? ' · aus dem Spam-Ordner' : '') + '</span>' +
-          '<span class="small" style="color:var(--ink-2)">' + esc((m.body || '').slice(0, 280)) + ((m.body || '').length > 280 ? ' …' : '') + '</span></div>' +
+          '<span class="small" style="color:var(--ink-2)">' + esc(body.slice(0, 280)) + (body.length > 280 ? ' …' : '') + '</span>' +
+          (m.link ? '<a class="small mono" style="word-break:break-all" href="' + url(m.link) + '" target="_blank" rel="noopener noreferrer">' + esc(m.link) + ' ' + I.ext + '</a>' : '') + '</div>' +
           '<div class="row wrap" style="gap:8px"><label class="sr" for="as-' + m.id + '">Anfrage</label><select id="as-' + m.id + '" class="input" style="width:240px;height:36px">' + opts + '</select>' +
           '<button class="btn sm p" data-act="assign" data-id="' + m.id + '">Zuordnen</button><button class="btn sm ghost" data-act="assign-ignore" data-id="' + m.id + '">Ignorieren</button></div></li>';
       }).join('') + '</ul></section>';
   }
   ACT.assign = function (el) {
     var ref = document.getElementById('as-' + el.dataset.id).value;
-    if (!ref) { toast('Bitte eine Anfrage wählen.', true); return; }
+    if (!ref) { toast('Bitte zuerst die Firma auswählen.', true); return; }
     busy(el, true);
-    api('/api/inbox/' + el.dataset.id + '/assign', { body: { ref: ref } }).then(function () { toast('Zugeordnet'); return refreshData(); })
+    api('/api/inbox/' + el.dataset.id + '/assign', { body: { ref: ref } }).then(function () { toast('Zugeordnet. Die Antwort steht jetzt oben zum Prüfen.'); return refreshData(); })
       .then(render).catch(function (e) { busy(el, false); fail(e); });
   };
   ACT['assign-ignore'] = function (el) {
-    api('/api/inbox/' + el.dataset.id + '/assign', { body: { ref: null } }).then(function () { toast('Ignoriert'); return refreshData(); })
-      .then(render).catch(fail);
+    var id = el.dataset.id;
+    api('/api/inbox/' + id + '/assign', { body: { ref: null } }).then(function () {
+      toast('Mail ignoriert', false, { fn: function () { api('/api/inbox/' + id + '/unignore', { body: {} }).then(refreshData).then(render).catch(fail); } });
+      return refreshData();
+    }).then(render).catch(fail);
   };
   ACT['inbox-sel'] = function (el) { S.ui.inboxSel = +el.dataset.id; S.ui.fullText = false; render(); };
   ACT['toggle-full'] = function () { S.ui.fullText = !S.ui.fullText; render(); };
@@ -469,9 +561,9 @@
     var cat = S.ui.inboxCat[id] || (item && item.category);
     busy(el, true);
     api('/api/inbox/' + id + '/confirm', { body: { category: cat } }).then(function (d) {
-      var msg = { done: 'Abgeschlossen', erasure_sent: 'Löschung angefordert', id_reply_sent: 'Antwort gesendet', clarify_sent: 'Antwort gesendet',
-        webform: 'Als „Formular offen“ markiert', complaint: 'Beschwerde-Text vorbereitet', confirmed: 'Vermerkt, Frist läuft weiter',
-        waiting: 'Spurlos wartet weiter auf eine Antwort' }[d.next] || 'Übernommen';
+      var msg = { done: 'Abgeschlossen', erasure_sent: 'Löschung angefordert, die Mail ist raus', id_reply_sent: 'Antwort gesendet', clarify_sent: 'Antwort gesendet',
+        webform: 'Status jetzt „Formular nötig“', complaint: 'Beschwerde-Text liegt bei der Anfrage bereit', confirmed: 'Vermerkt, die Frist läuft weiter',
+        ack: 'Vermerkt, Spurlos wartet auf die eigentliche Antwort', waiting: 'Spurlos wartet weiter auf eine Antwort' }[d.next] || 'Übernommen';
       toast(msg);
       S.ui.inboxSel = null;
       return refreshData();
@@ -479,13 +571,15 @@
   };
 
   // ------------------------------------------------------------------ Anfragen
-  var FILTERS = [['all', 'Alle', '#0E1116'], ['todo', 'Zu tun', '#E07B24'], ['wait', 'Wartet', '#3E6FE8'], ['overdue', 'Frist abgelaufen', '#C93A3A'],
+  var FILTERS = [['all', 'Alle', '#0E1116'], ['todo', 'Zu tun', '#E07B24'], ['wait', 'Wartet auf Antwort', '#3E6FE8'], ['overdue', 'Frist abgelaufen', '#C93A3A'],
     ['done', 'Abgeschlossen', '#1F8A5B'], ['planned', 'Versand geplant', '#9AA1AD'], ['missing', 'Kontakt fehlt', '#C9CED6']];
   function renderRequests() {
     var rows = S.requests;
+    var t = (S.overview && S.overview.today) || {};
+    var sendBtn = t.planned ? '<button class="btn" data-act="send-batch">' + I.send + '<span>' + pl(t.planned, 'Anfrage jetzt senden', 'Anfragen jetzt senden') + '</span></button>' + tipBtn(SEND_TIP + '<br><br>Dieser Knopf verschickt die für heute geplanten Anfragen sofort, statt über den Tag verteilt.', 'end', 'Was macht dieser Knopf?') :
+      (S.overview && S.overview.counts && S.overview.counts.planned ? '<span class="small muted">Für heute ist alles verschickt' + (t.next ? ', weiter geht es ' + fmtWhenIn(t.next) : '') + '</span>' : '');
     var top = head((S.overview ? S.overview.total + ' Firmen · ' + S.overview.sent + ' angeschrieben' : ''), 'Anfragen',
-      '<div style="position:relative" class="row"><label for="q" class="sr">Firma oder Aktenzeichen suchen</label><input id="q" class="input" style="width:240px" type="search" placeholder="Firma oder Aktenzeichen" data-ui="reqSearch" data-rerender="1" value="' + esc(S.ui.reqSearch) + '"></div>' +
-      '<button class="btn" data-act="send-batch">' + I.send + '<span>Heutige Anfragen jetzt senden</span></button>');
+      '<div style="position:relative" class="row"><label for="q" class="sr">Firma suchen</label><input id="q" class="input" style="width:220px" type="search" placeholder="Firma suchen" data-ui="reqSearch" data-rerender="1" value="' + esc(S.ui.reqSearch) + '"></div>' + sendBtn);
     if (!rows) return top + '<div class="empty"><span class="spin"></span></div>';
     var counts = { all: rows.length };
     rows.forEach(function (r) { counts[r.group] = (counts[r.group] || 0) + 1; });
@@ -501,12 +595,12 @@
     var cols = 'grid-template-columns:minmax(150px,2fr) minmax(130px,1.4fr) 76px 54px 54px;min-width:560px';
     var list = vis.map(function (r) {
       var overdue = r.group === 'overdue';
-      return '<div class="trow ' + (r.ref === S.ui.reqSel ? 'sel' : '') + '" style="' + cols + '"><div class="stack" style="gap:2px;min-width:0"><button class="name" data-act="req-sel" data-ref="' + esc(r.ref) + '">' + esc(r.broker_name) + '</button><span class="tiny muted"><span class="mono">' + esc(r.ref) + '</span> · ' + esc(r.category || groupLabel(r.grp)) + '</span></div>' +
+      return '<div class="trow click ' + (r.ref === S.ui.reqSel ? 'sel' : '') + '" style="' + cols + '" data-act="req-sel" data-ref="' + esc(r.ref) + '"><div class="stack" style="gap:2px;min-width:0"><button class="name" data-act="req-sel" data-ref="' + esc(r.ref) + '">' + esc(r.broker_name) + '</button><span class="tiny muted"><span class="mono">' + esc(r.ref) + '</span> · ' + esc(r.category || groupLabel(r.grp)) + '</span></div>' +
         '<span>' + pill(r.group, r.label) + '</span><span class="small" style="color:var(--ink-2)">' + esc({ email: 'E-Mail', webform: 'Webformular', letter: 'Brief', none: '–' }[r.channel] || r.channel) + '</span>' +
-        '<span class="mono tiny" style="color:var(--ink-2)">' + (r.sent_at ? fmtDay(r.sent_at) : r.planned_for ? fmtDay(r.planned_for) : '–') + '</span>' +
+        '<span class="mono tiny" style="color:var(--ink-2)">' + (r.sent_at ? fmtDay(r.sent_at) : '–') + '</span>' +
         '<span class="mono tiny" style="color:' + (overdue ? '#B91C1C' : 'var(--ink-2)') + ';font-weight:' + (overdue ? 600 : 400) + '">' + (r.due_at && r.group !== 'done' ? fmtDay(r.due_at) : '–') + '</span></div>';
-    }).join('') || '<div class="empty">Keine Anfragen mit diesem Status.</div>';
-    var table = '<section class="card table-card" style="flex:3 1 560px"><div class="table-scroll"><div class="trow head" style="' + cols + '"><span>Firma</span><span>Status</span><span>Kanal</span><span>Gesendet</span><span>Frist</span></div>' + list + '</div>' +
+    }).join('') || '<div class="empty">' + (q ? 'Keine Firma passt zu „' + esc(S.ui.reqSearch) + '“' + (S.ui.reqFilter !== 'all' ? ' in dieser Ansicht' : '') + '.' : 'Keine Anfragen mit diesem Status.') + '</div>';
+    var table = '<section class="card table-card" style="flex:3 1 560px"><div class="table-scroll" data-keep="reqtable"><div class="trow head" style="' + cols + '"><span>Firma</span><span>Status</span><span>Kanal</span><span>Gesendet</span><span>Frist</span></div>' + list + '</div>' +
       '<div class="table-foot"><span>' + vis.length + ' von ' + rows.length + ' angezeigt</span></div></section>';
     var detail = renderReqDetail();
     if (!rows.length) {
@@ -531,21 +625,24 @@
     if (st === 'overdue' || st === 'reminded') { acts.push(btn('Beschwerde-Text', 'req-complaint', true), btn('Jetzt erinnern', 'req-remind'), btn('Als abgeschlossen markieren', 'req-done')); }
     if (st === 'complaint') { acts.push(btn('Beschwerde-Text', 'req-complaint', true), btn('Als abgeschlossen markieren', 'req-done')); }
     if (st === 'review') { acts.push('<a class="btn sm p" href="#/eingang">Im Eingang ansehen</a>', btn('Als abgeschlossen markieren', 'req-done')); }
+    var steps = '';
     if (st === 'webform') {
+      steps = '<ol class="ol small" style="gap:8px"><li><span class="k">1</span><span>' + (b.webform ? 'Das Formular der Firma öffnen.' : 'Das Formular auf der Website der Firma suchen (Datenschutz, Betroffenenrechte).') + '</span></li>' +
+        '<li><span class="k">2</span><span>Den Text der Anfrage kopieren und dort einfügen.</span></li><li><span class="k">3</span><span>Danach hier „Formular abgeschickt“ klicken, dann überwacht Spurlos die Frist.</span></li></ol>';
       if (b.webform) acts.push('<a class="btn sm p" href="' + url(b.webform) + '" target="_blank" rel="noopener">Formular öffnen ' + I.ext + '</a>');
       acts.push(btn('Text zum Einfügen', 'req-preview'), btn('Formular abgeschickt', 'req-webform-sent'));
     }
     if (st === 'failed') { acts.push(btn('Kontakt bearbeiten', 'req-edit-broker', true), btn('Erneut senden', 'req-send')); }
     if (st === 'no_contact' || st === 'letter') { acts.push(btn('Kontakt ergänzen', 'req-edit-broker', true), btn('Auslassen', 'req-skip')); }
     if (st === 'done') { acts.push(btn('Wieder öffnen', 'req-reopen')); }
-    return '<div class="stack" style="gap:8px"><div class="row between"><span class="mono small muted">' + esc(r.ref) + '</span>' + pill(r.group, r.label) + '</div><h2 style="font-size:20px">' + esc(b.name) + '</h2>' +
+    return '<div class="stack" style="gap:8px"><div class="row between"><span class="row" style="gap:0"><span class="mono small muted">' + esc(r.ref) + '</span>' + tipBtn('<strong>Aktenzeichen</strong>Spurlos vergibt für jede Firma ein eigenes Kennzeichen. Es steht im Betreff jeder Mail, damit Antworten automatisch der richtigen Anfrage zugeordnet werden.', 'start', 'Was ist das?') + '</span>' + pill(r.group, r.label) + '</div><h2 style="font-size:20px">' + esc(b.name) + '</h2>' +
       (b.what ? '<span class="small muted">' + esc(b.what) + '</span>' : '') + '</div>' +
       '<dl style="margin:0;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px 16px">' +
       dl('Art', esc(b.category || groupLabel(b.grp))) + dl('Sprache', langLabel(b.lang)) +
-      dl('Gesendet', '<span class="mono">' + (r.sent_at ? fmtDay(r.sent_at) : '–') + '</span>') + dl('Frist', '<span class="mono">' + (r.due_at ? fmtDay(r.due_at) : '–') + '</span>') +
+      (r.sent_at ? dl('Gesendet', '<span class="mono">' + fmtDay(r.sent_at) + '</span>') : dl('Geplant für', '<span class="mono">' + (r.planned_for ? fmtWhen(r.planned_for) : '–') + '</span>')) + dl('Frist', '<span class="mono">' + (r.due_at && r.status !== 'done' ? fmtDay(r.due_at) : '–') + '</span>') +
       '<div class="stack" style="grid-column:1/-1;gap:2px"><dt class="label">Kontakt</dt><dd style="margin:0">' + contact + '</dd></div>' +
       (b.source_url ? '<div style="grid-column:1/-1"><dt class="label">Kontaktdaten aus</dt><dd style="margin:0" class="small"><a href="' + url(b.source_url) + '" target="_blank" rel="noopener">' + esc(sourceName(b)) + ' ' + I.ext + '</a></dd></div>' : '') +
-      '</dl><div class="stack" style="gap:10px"><span class="label">Verlauf</span><ol class="timeline">' + ev + '</ol></div>' +
+      '</dl>' + steps + '<div class="stack" style="gap:10px"><span class="label">Verlauf</span><ol class="timeline">' + ev + '</ol></div>' +
       '<div class="row wrap" style="padding-top:14px;border-top:1px solid var(--line-3)">' + acts.join('') + '</div>';
   }
   function dl(k, v) { return '<div class="stack" style="gap:2px"><dt class="label">' + k + '</dt><dd style="margin:0" class="small">' + v + '</dd></div>'; }
@@ -565,11 +662,20 @@
       .then(render).catch(function (e) { busy(el, false); fail(e); });
   }
   ACT['req-send'] = function (el) { reqAction(el, 'send_now', {}, 'Anfrage gesendet'); };
-  ACT['req-remind'] = function (el) { reqAction(el, 'remind', {}, 'Erinnerung gesendet'); };
+  ACT['req-remind'] = function (el) {
+    var d = S.reqDetail;
+    var early = d && d.request.due_at && parseDate(d.request.due_at) > new Date();
+    confirmModal('Jetzt erinnern?', 'Spurlos schickt ' + esc(d ? d.broker.name : 'der Firma') + ' sofort eine Erinnerung.' +
+      (early ? ' Die Frist läuft eigentlich noch bis ' + fmtDay(d.request.due_at) + ', normalerweise erinnert Spurlos danach von selbst.' : ''), 'Erinnerung senden',
+      function () { return reqAction(el, 'remind', {}, 'Erinnerung gesendet'); });
+  };
   ACT['req-done'] = function (el) { reqAction(el, 'done', {}, 'Als abgeschlossen markiert'); };
   ACT['req-reopen'] = function (el) { reqAction(el, 'reopen', {}, 'Wieder geöffnet'); };
   ACT['req-webform-sent'] = function (el) { reqAction(el, 'webform_sent', {}, 'Frist läuft ab heute'); };
-  ACT['req-skip'] = function (el) { if (confirm('Diese Firma auslassen? Du kannst sie in der Händlerliste wieder einschalten.')) reqAction(el, 'skip', {}, 'Ausgelassen'); };
+  ACT['req-skip'] = function (el) {
+    confirmModal('Diese Firma auslassen?', 'Spurlos schreibt sie dann nicht an. In der Firmenliste kannst du sie jederzeit wieder einschalten.', 'Auslassen',
+      function () { return reqAction(el, 'skip', {}, 'Ausgelassen'); });
+  };
   ACT['req-preview'] = function (el) {
     api('/api/requests/' + encodeURIComponent(el.dataset.ref) + '/preview').then(function (d) {
       textModal(d.sent ? 'Gesendete Anfrage' : 'Text der Anfrage', 'An: ' + d.to, d.subject, d.body);
@@ -588,7 +694,7 @@
           (a.form_preferred ? '<br><span class="small">Diese Behörde möchte Beschwerden über ihr Online-Formular bekommen. Kopier den Text dort hinein.</span>' : '') +
           '<br><span class="small muted">Häng deine Anfrage und die Erinnerung an. Beides findest du in deinem Gesendet-Ordner.</span></span></div>';
       } else {
-        extra = '<div class="notice warn">' + I.warn + '<span>Trag in den Einstellungen unter „Meine Daten“ dein Bundesland ein, dann zeigt Spurlos die zuständige Behörde.</span></div>';
+        extra = '<div class="notice warn">' + I.warn + '<span>' + (S.boot.countries.indexOf('de') >= 0 ? 'Trag in den Einstellungen unter „Meine Daten“ dein Bundesland ein, dann zeigt Spurlos die zuständige Behörde.' : 'Zuständig ist die Datenschutzbehörde deines Landes. Den Text kannst du dort einreichen.') + '</span></div>';
       }
       textModal('Beschwerde an die Datenschutzbehörde', 'Spurlos verschickt die Beschwerde nicht selbst. Du reichst sie bei der Behörde ein.', d.subject, d.body, extra);
     }).catch(fail);
@@ -613,10 +719,10 @@
     }).then(render).catch(fail).then(function () { busy(el, false); });
   };
 
-  // ------------------------------------------------------------------ Händlerliste
+  // ------------------------------------------------------------------ Firmenliste
   function renderBrokers() {
     var d = S.brokers;
-    var top = head(d ? d.brokers.filter(function (b) { return b.selected; }).length + ' ausgewählt · ' + d.brokers.length + ' Firmen bekannt' + (d.last_update ? ' · zuletzt geprüft ' + fmtWhen(d.last_update, true) : '') : '', 'Händlerliste',
+    var top = head(d ? d.brokers.filter(function (b) { return b.selected; }).length + ' ausgewählt · ' + d.brokers.length + ' Firmen bekannt' + (d.last_update ? ' · zuletzt geprüft ' + fmtWhen(d.last_update, true) : '') : '', 'Firmenliste',
       '<button class="btn" data-act="brokers-update">' + I.refresh + '<span>Liste aktualisieren</span></button><button class="btn p" data-act="broker-add">Firma hinzufügen</button>');
     if (!d) return top + '<div class="empty"><span class="spin"></span></div>';
     var news = d.brokers.filter(function (b) { return b.is_new && b.relevant; });
@@ -626,7 +732,7 @@
     var info = d.update && d.update.errors && d.update.errors.length ? '<div class="notice warn">' + I.warn + '<span>Letzte Aktualisierung unvollständig: ' + esc(d.update.errors.join(' · ')) + '</span></div>' : '';
     var groups = S.boot.group_order.map(function (g) {
       var inGroup = d.brokers.filter(function (b) { return b.grp === g && b.relevant; });
-      if (!inGroup.length && g !== 'us') return '';
+      if (!inGroup.length) return '';
       var on = !!S.boot.groups[g];
       var withMail = inGroup.filter(function (b) { return b.contact === 'email'; }).length;
       var missing = inGroup.filter(function (b) { return b.contact === 'none'; }).length;
@@ -636,7 +742,7 @@
         '<span class="mono small muted" style="text-align:right">' + inGroup.length + ' Firmen<br>' + withMail + ' per E-Mail' + (missing ? ' · ' + missing + ' ohne Kontakt' : '') + '</span></div>';
     }).join('');
     var tabs = [['all', 'Alle']].concat(S.boot.group_order.map(function (g) { return [g, groupLabel(g)]; }));
-    var views = [['selected', 'Ausgewählt'], ['all', 'Alle bekannten'], ['missing', 'Kontakt fehlt'], ['new', 'Neu']];
+    var views = [['selected', 'Wird angeschrieben'], ['all', 'Alle bekannten'], ['missing', 'Kontakt fehlt'], ['new', 'Neu dazugekommen']];
     var q = (S.ui.brSearch || '').toLowerCase();
     var rows = d.brokers.filter(function (b) {
       if (S.ui.brTab !== 'all' && b.grp !== S.ui.brTab) return false;
@@ -645,14 +751,13 @@
       if (S.ui.brView === 'new' && !b.is_new) return false;
       return !q || (b.name + ' ' + (b.email || '') + ' ' + (b.category || '')).toLowerCase().indexOf(q) >= 0;
     });
-    var cols = 'grid-template-columns:44px minmax(190px,2fr) minmax(120px,1fr) minmax(210px,1.5fr) 64px minmax(140px,1fr) 60px';
+    var cols = 'grid-template-columns:44px minmax(180px,2fr) minmax(110px,1fr) minmax(200px,1.5fr) minmax(130px,1fr) 60px;min-width:640px';
     var list = rows.slice(0, 400).map(function (b) {
       var contact = b.contact === 'email' ? '<span class="mono tiny" style="overflow-wrap:anywhere">' + esc(b.email) + '</span>' : b.contact === 'webform' ? '<a class="small" href="' + url(b.webform) + '" target="_blank" rel="noopener">Webformular ' + I.ext + '</a>' : b.contact === 'letter' ? '<span class="small">Nur per Post</span>' : '<span class="small" style="color:#9A3412;font-weight:600">Kontakt fehlt</span>';
-      var req = b.request ? pill(b.request.group, b.request.label) : (b.selected ? '<span class="tiny muted">noch nicht angelegt</span>' : '<span class="tiny muted">–</span>');
+      var req = b.request ? pill(b.request.group, b.request.label) : (b.selected ? '<span class="tiny muted">' + (S.boot.started ? 'wird angelegt' : 'nach dem Start') + '</span>' : '<span class="tiny muted">–</span>');
       return '<div class="trow" style="' + cols + '"><button class="switch" role="switch" aria-checked="' + b.active + '" aria-label="' + esc(b.name) + ' einbeziehen" data-act="broker-active" data-id="' + esc(b.id) + '"></button>' +
         '<div class="stack" style="gap:2px;min-width:0"><div class="row" style="gap:8px"><b>' + esc(b.name) + '</b>' + (b.is_new ? '<span class="tag mint">Neu</span>' : '') + (b.relevant ? '' : '<span class="tag">anderes Land</span>') + '</div><span class="tiny muted">' + esc(b.what || b.category || '') + '</span></div>' +
-        '<span class="small" style="color:var(--ink-2)">' + esc(groupLabel(b.grp)) + '</span>' + contact +
-        '<span class="small" style="color:var(--ink-2)">' + langLabel(b.lang) + '</span>' + '<span>' + req + '</span>' +
+        '<span class="small" style="color:var(--ink-2)">' + esc(groupLabel(b.grp)) + '</span>' + contact + '<span>' + req + '</span>' +
         '<button class="btn ghost sm" data-act="broker-edit" data-id="' + esc(b.id) + '">Ändern</button></div>';
     }).join('') || '<div class="empty">Keine Firmen in dieser Ansicht.</div>';
     return top + banner + info +
@@ -661,18 +766,21 @@
       '<div class="chips">' + tabs.map(function (t) { return '<button class="chip ' + (S.ui.brTab === t[0] ? 'on' : '') + '" data-act="br-tab" data-t="' + t[0] + '">' + esc(t[1]) + '</button>'; }).join('') + '</div>' +
       '<div class="row wrap"><select class="input" style="width:auto;height:36px" data-ui="brView" aria-label="Ansicht">' + views.map(function (v) { return '<option value="' + v[0] + '"' + (S.ui.brView === v[0] ? ' selected' : '') + '>' + v[1] + '</option>'; }).join('') + '</select>' +
       '<label for="bq" class="sr">Firma suchen</label><input id="bq" class="input" style="width:200px;height:36px" type="search" placeholder="Suchen" data-ui="brSearch" data-rerender="1" value="' + esc(S.ui.brSearch) + '"></div></div>' +
-      '<div class="table-scroll"><div class="trow head" style="' + cols + '"><span></span><span>Firma</span><span>Gruppe</span><span>Kontakt</span><span>Sprache</span><span>Anfrage</span><span></span></div>' + list + '</div>' +
+      '<div class="table-scroll" data-keep="brtable"><div class="trow head" style="' + cols + '"><span></span><span>Firma</span><span>Gruppe</span><span>Kontakt</span><span>Anfrage</span><span></span></div>' + list + '</div>' +
       '<div class="table-foot"><span>' + Math.min(rows.length, 400) + ' von ' + rows.length + ' angezeigt</span><span class="small">Quellen: datenanfragen.de (CC0), Incogni-Liste, Register Kalifornien, eigene Recherche</span></div></section>';
   }
   document.addEventListener('change', function (e) { if (e.target.dataset && e.target.dataset.ui === 'brView') render(); });
   ACT['br-tab'] = function (el) { S.ui.brTab = el.dataset.t; render(); };
+  function switching(el) { el.disabled = true; el.setAttribute('aria-busy', 'true'); }
   ACT['toggle-group'] = function (el) {
     var g = el.dataset.g; var groups = {}; groups[g] = !S.boot.groups[g];
-    api('/api/groups', { body: { groups: groups } }).then(function (d) { S.boot.groups = d.groups; return refreshData(); }).then(render).catch(fail);
+    switching(el);
+    api('/api/groups', { body: { groups: groups } }).then(function (d) { S.boot.groups = d.groups; return refreshData(); }).then(render).catch(function (e) { render(); fail(e); });
   };
   ACT['broker-active'] = function (el) {
     var on = el.getAttribute('aria-checked') !== 'true';
-    api('/api/brokers/' + encodeURIComponent(el.dataset.id) + '/active', { body: { active: on } }).then(refreshData).then(render).catch(fail);
+    switching(el);
+    api('/api/brokers/' + encodeURIComponent(el.dataset.id) + '/active', { body: { active: on } }).then(refreshData).then(render).catch(function (e) { render(); fail(e); });
   };
   ACT['brokers-seen'] = function () { api('/api/brokers/seen', { body: {} }).then(refreshData).then(render).catch(fail); };
   ACT['brokers-update'] = function (el) {
@@ -680,7 +788,7 @@
     api('/api/brokers/update', { body: {} }).then(function (d) {
       var i = d.info || {};
       var added = ((i.datenanfragen || {}).added || 0) + (((i.incogni || {}).added || []).length) + ((i.kalifornien || {}).added || 0);
-      toast(i.errors && i.errors.length ? 'Teilweise aktualisiert: ' + i.errors[0] : 'Liste aktualisiert, ' + added + ' neue Firmen', i.errors && i.errors.length);
+      toast(i.errors && i.errors.length ? 'Teilweise aktualisiert: ' + i.errors[0] : 'Liste aktualisiert, ' + pl(added, 'neue Firma', 'neue Firmen'), i.errors && i.errors.length);
       return refreshData();
     }).then(render).catch(fail).then(function () { busy(el, false); });
   };
@@ -722,6 +830,7 @@
           var id = list + '-' + i + '-' + f.k;
           var top = i === 0 && f.type !== 'check' ? '<label class="lbl" for="' + id + '" style="font-size:12px;color:var(--muted);font-weight:500">' + f.label + '</label>' : '<label class="sr" for="' + id + '">' + f.label + '</label>';
           if (f.type === 'check') return '<label class="check" style="height:44px"><input id="' + id + '" type="checkbox" data-list="' + list + '" data-i="' + i + '" data-k="' + f.k + '"' + (row[f.k] ? ' checked' : '') + '>' + f.label + '</label>';
+          if (f.type === 'select') return '<div class="stack" style="gap:4px;flex:0 1 ' + (f.w || '150px') + ';min-width:120px">' + top + '<select id="' + id + '" class="input" data-list="' + list + '" data-i="' + i + '" data-k="' + f.k + '">' + f.opts.map(function (o) { return '<option' + ((row[f.k] || f.opts[0]) === o ? ' selected' : '') + '>' + esc(o) + '</option>'; }).join('') + '</select></div>';
           return '<div class="stack" style="gap:4px;flex:' + (f.w ? '0 1 ' + f.w : '1 1 200px') + ';min-width:' + (f.w ? '90px' : '160px') + '">' + top + '<input id="' + id + '" class="input' + (f.mono ? ' mono' : '') + '" placeholder="' + esc(f.ph || '') + '" data-list="' + list + '" data-i="' + i + '" data-k="' + f.k + '" value="' + esc(row[f.k] || '') + '"' + (f.type ? ' type="' + f.type + '"' : '') + (f.mode ? ' inputmode="' + f.mode + '"' : '') + '></div>';
         }).join('') + '<button class="iconbtn" aria-label="Zeile entfernen" data-act="del-row" data-list="' + list + '" data-i="' + i + '">' + I.trash + '</button></div>';
       }).join('');
@@ -742,25 +851,25 @@
     }
     var states = '<option value="">Bitte wählen</option>' + S.boot.states.map(function (s) { return '<option' + (S.draft.state === s ? ' selected' : '') + '>' + esc(s) + '</option>'; }).join('');
     return '<div class="card"><h3>Name</h3><div class="form-grid">' +
-      '<div class="field"><label for="fn">Vorname</label><input id="fn" class="input" data-p="first_name" value="' + esc(p.first_name) + '" autocomplete="given-name"></div>' +
-      '<div class="field"><label for="ln">Nachname</label><input id="ln" class="input" data-p="last_name" value="' + esc(p.last_name) + '" autocomplete="family-name"></div>' +
+      '<div class="field"><label for="fn">Vorname' + REQ + '</label><input id="fn" class="input" data-p="first_name" value="' + esc(p.first_name) + '" autocomplete="given-name"></div>' +
+      '<div class="field"><label for="ln">Nachname' + REQ + '</label><input id="ln" class="input" data-p="last_name" value="' + esc(p.last_name) + '" autocomplete="family-name"></div>' +
       '<div class="field"><label for="former">Frühere Namen (optional)</label><input id="former" class="input" data-act-none="1" value="' + esc((p.former_names || []).join(', ')) + '" placeholder="z. B. Geburtsname"></div></div></div>' +
-      '<div class="card"><div class="stack" style="gap:2px"><h3>Adressen</h3><span class="hint">Deine jetzige Adresse und frühere, etwa der letzten zehn Jahre. Adresshändler speichern auch alte Adressen. Wann du wo gewohnt hast, brauchen die Firmen nicht. Setz nur bei der jetzigen Adresse den Haken „wohne ich jetzt“.</span></div>' +
+      '<div class="card"><div class="stack" style="gap:2px"><h3>Adressen' + REQ + '</h3><span class="hint">Deine jetzige Adresse und frühere, etwa der letzten zehn Jahre. Adresshändler speichern auch alte Adressen. Setz nur bei der jetzigen den Haken „wohne ich jetzt“.</span></div>' +
       rep('addresses', [{ k: 'street', label: 'Straße und Hausnummer', ph: 'Musterstraße 1' }, { k: 'zip', label: 'PLZ', ph: '12345', w: '110px', mode: 'numeric' }, { k: 'city', label: 'Ort', ph: 'Musterstadt', w: '240px' }, { k: 'current', label: 'wohne ich jetzt', type: 'check' }], 'Adresse') + '</div>' +
-      '<div class="card"><div class="stack" style="gap:2px"><h3>E-Mail-Adressen</h3><span class="hint">Alle Adressen, die du je benutzt hast, auch alte und geschäftliche, z. B. von früheren Arbeitgebern. Bitte genau prüfen: Die Firmen suchen nach exakt dieser Schreibweise. Gmail und Googlemail sind dasselbe Postfach, eine Schreibweise reicht. Spurlos nennt den Firmen automatisch beide.</span></div>' +
+      '<div class="card"><div class="stack" style="gap:2px"><h3>E-Mail-Adressen' + REQ + '</h3><span class="hint">Alle Adressen, die du je benutzt hast, auch alte und geschäftliche. Bitte genau prüfen, die Firmen suchen nach exakt dieser Schreibweise. Bei Gmail/Googlemail reicht eine Schreibweise, Spurlos nennt automatisch beide.</span></div>' +
       rep('emails', [{ k: 'address', label: 'E-Mail-Adresse', ph: 'name@beispiel.de', mono: true, type: 'email' }], 'E-Mail-Adresse') + '</div>' +
-      '<div class="card"><div class="stack" style="gap:2px"><h3>Telefonnummern</h3><span class="hint">Mobil und Festnetz, auch alte Nummern. Am besten mit Ländervorwahl, z. B. +49 174 1234567. Spurlos nennt den Firmen beide Schreibweisen (+49 … und 0…), weil sie Nummern unterschiedlich speichern.</span></div>' +
-      rep('phones', [{ k: 'number', label: 'Telefonnummer', ph: '+49 174 1234567', mono: true, type: 'tel' }, { k: 'label', label: 'Art', ph: 'Mobil', w: '160px' }], 'Nummer') + '</div>' +
+      '<div class="card"><div class="stack" style="gap:2px"><h3>Telefonnummern</h3><span class="hint">Mobil und Festnetz, auch alte Nummern, am besten mit Ländervorwahl (+49 …). Spurlos nennt den Firmen beide Schreibweisen.</span></div>' +
+      rep('phones', [{ k: 'number', label: 'Telefonnummer', ph: '+49 174 1234567', mono: true, type: 'tel' }, { k: 'label', label: 'Art', type: 'select', opts: ['Mobil', 'Festnetz', 'Geschäftlich', 'Alte Nummer'], w: '160px' }], 'Nummer') + '</div>' +
       '<div class="card">' + head('Eigene Firmen (optional)', '<strong>Warum eigene Firmen?</strong>Händler für Firmenadressen sammeln Firmendaten aus Impressum, Handelsregister und Branchenbüchern und verkaufen sie für Werbung. Manche führen dich dort nur unter dem Firmennamen. Bei Einzelunternehmen und GbR sind die Firmendaten zugleich deine eigenen Daten. Bei GmbH oder UG gehören sie der Firma, aber dein Name und deine Kontaktdaten als Geschäftsführer sind deine Daten. In beiden Fällen hilft der Firmenname, deinen Eintrag zu finden.', 'tip-job',
         'Firmen, die dir gehören oder gehört haben oder die du als Geschäftsführer geleitet hast, egal in welcher Rechtsform. Frühere Arbeitgeber musst du nicht angeben: Dafür reichen deine alten Arbeits-E-Mail-Adressen oben.') +
       rep('companies', [{ k: 'name', label: 'Firmenname', ph: 'z. B. Mustermann Media' }], 'Firma') + '</div>' +
       '<div class="card">' + head('Eigene Webseiten (optional)', '<strong>Warum Webseiten?</strong>Wer eine Webseite hat, steht mit Name und Anschrift im Impressum, oft auch in der Domain-Registrierung. Firmen, die solche Daten sammeln, finden dich über die Adresse der Seite.', 'tip-web',
         'Webseiten, die dir gehören oder gehört haben, privat oder für deine Firma.') +
       rep('websites', [{ k: 'url', label: 'Webseite', ph: 'meinname.de', mono: true }], 'Webseite') + '</div>' +
-      '<div class="card"><div class="stack" style="gap:2px"><h3>Länder</h3><span class="hint">In welchen Ländern hast du gewohnt, gearbeitet oder ein Konto gehabt? Auch wenn du dort nur arbeitest. Danach richtet sich die Firmenliste.</span></div><div class="chips">' + countries + '</div>' +
-      '<div class="field" style="max-width:420px"><div class="row" style="gap:2px"><label for="state">Dein Bundesland</label>' +
+      '<div class="card"><div class="stack" style="gap:2px"><h3>Länder</h3><span class="hint">In welchen Ländern hast du gewohnt, gearbeitet oder ein Konto gehabt? Danach richtet sich die Firmenliste.</span></div><div class="chips">' + countries + '</div>' +
+      (S.draft.countries.indexOf('de') >= 0 ? '<div class="field" style="max-width:420px"><div class="row" style="gap:2px"><label for="state">Dein Bundesland</label>' +
       tip('tip-state', 'Wofür braucht Spurlos das Bundesland?', '<strong>Nur für den Notfall</strong>Antwortet eine Firma trotz Erinnerung nicht, kannst du dich kostenlos bei einer Datenschutzbehörde beschweren. Die Behörde kann die Firma zur Antwort zwingen. Spurlos schreibt dir den Text. Sitzt die Firma im Ausland, ist die Behörde deines Bundeslands zuständig.', 'start') +
-      '</div><select id="state" class="input" data-state="1">' + states + '</select><span class="hint">Nur für eine Beschwerde, falls eine Firma nicht antwortet.</span></div></div>';
+      '</div><select id="state" class="input" data-state="1">' + states + '</select><span class="hint">Nur für eine Beschwerde, falls eine Firma nicht antwortet.</span></div>' : '') + '</div>';
   }
   document.addEventListener('input', function (e) {
     if (e.target.id === 'former' && S.draft) {
@@ -777,7 +886,7 @@
   ACT['toggle-country'] = function (el) {
     var c = el.dataset.c; var i = S.draft.countries.indexOf(c);
     if (i >= 0) S.draft.countries.splice(i, 1); else S.draft.countries.push(c);
-    render();
+    markDirty(el); render();
   };
   function cleanProfile() {
     var p = JSON.parse(JSON.stringify(S.draft.profile));
@@ -791,18 +900,19 @@
   }
   function saveProfile() {
     var p = cleanProfile();
-    if (!(p.first_name || '').trim() || !(p.last_name || '').trim()) return Promise.reject(new Error('Bitte Vor- und Nachnamen eintragen.'));
-    if (!p.addresses.length && !p.emails.length) return Promise.reject(new Error('Bitte mindestens eine Adresse oder E-Mail-Adresse eintragen.'));
+    if (!(p.first_name || '').trim()) return fieldError('fn', 'Bitte deinen Vornamen eintragen.');
+    if (!(p.last_name || '').trim()) return fieldError('ln', 'Bitte deinen Nachnamen eintragen.');
+    if (!p.addresses.length) return fieldError('addresses-0-street', 'Bitte mindestens deine jetzige Adresse eintragen.');
+    if (!p.emails.length) return fieldError('emails-0-address', 'Bitte mindestens eine E-Mail-Adresse eintragen.');
+    var badMail = p.emails.filter(function (e) { return !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e.address); })[0];
+    if (badMail) { var i = S.draft.profile.emails.map(function (e) { return (e.address || '').trim(); }).indexOf(badMail.address); return fieldError('emails-' + Math.max(0, i) + '-address', 'Das sieht nicht nach einer E-Mail-Adresse aus.'); }
     if (!S.draft.countries.length) S.draft.countries = ['de'];
     return api('/api/profile', { body: { profile: p, state: S.draft.state, countries: S.draft.countries } }).then(function () {
-      S.boot.profile = p; S.boot.state = S.draft.state; S.boot.countries = S.draft.countries.slice();
+      S.boot.profile = p; S.boot.state = S.draft.state; S.boot.countries = S.draft.countries.slice(); clearDirty('daten');
     });
   }
 
   var PROV = {
-    domain: { name: 'Eigene Domain', sub: 'z. B. all-inkl, Strato, IONOS', tag: 'Empfohlen', open: '', pw: 'Passwort', ph: 'dsgvo@deine-domain.de',
-      steps: ['Im Kundenmenü deines Anbieters ein neues Postfach anlegen, zum Beispiel dsgvo@deine-domain.de.', 'Adresse und Passwort unten eintragen.', 'Mit „Serverdaten suchen“ findet Spurlos die Server meist selbst. Sonst stehen sie im Kundenmenü deines Anbieters.'],
-      note: 'Kostet nichts extra, wenn dein Hosting-Tarif Postfächer enthält. Die Mails liegen dann bei deinem eigenen Anbieter.' },
     gmx: { name: 'GMX', sub: 'Kostenlos · Server in Deutschland', open: 'https://www.gmx.net/', pw: 'Passwort', ph: 'name@gmx.de',
       steps: ['Kostenloses GMX-Postfach anlegen.', 'In GMX unter Einstellungen › POP3/IMAP Abruf das Häkchen bei „POP3 und IMAP Zugriff erlauben“ setzen und speichern.', 'Adresse und Passwort unten eintragen.'],
       note: 'GMX schaltet diesen Zugriff nach längerer Pause wieder ab. Spurlos merkt das und sagt dir Bescheid.' },
@@ -814,11 +924,14 @@
       note: 'Das App-Passwort gilt nur für Spurlos. Du kannst es jederzeit wieder löschen.' },
     gmail: { name: 'Gmail', sub: 'Kostenlos · Daten liegen bei Google', open: 'https://accounts.google.com/signup', pw: 'App-Passwort', ph: 'name@gmail.com',
       steps: ['Kostenloses Google-Konto anlegen.', 'Im Google-Konto unter Sicherheit die Bestätigung in zwei Schritten einschalten.', 'Unter Sicherheit › App-Passwörter ein Passwort für Spurlos erstellen.', 'Adresse und App-Passwort unten eintragen.'],
-      note: 'Funktioniert gut. Deine ganze Korrespondenz mit den Datenhändlern liegt dann aber bei Google.' }
+      note: 'Funktioniert gut. Deine ganze Korrespondenz mit den Datenhändlern liegt dann aber bei Google.' },
+    domain: { name: 'Eigene Internetadresse', sub: 'Wenn du eine eigene Domain hast, z. B. bei all-inkl, Strato oder IONOS', open: '', pw: 'Passwort', ph: 'dsgvo@deine-domain.de',
+      steps: ['Im Kundenmenü deines Anbieters ein neues Postfach anlegen, zum Beispiel dsgvo@deine-domain.de.', 'Adresse und Passwort unten eintragen. Die Serverdaten sucht Spurlos beim Weitergehen selbst.'],
+      note: 'Kostet nichts extra, wenn dein Tarif Postfächer enthält. Die Mails liegen dann bei deinem eigenen Anbieter.' }
   };
   function mailboxForm() {
     var m = S.draft.mailbox;
-    var cur = m.provider || 'domain';
+    var cur = m.provider || 'gmx';
     var tiles = Object.keys(PROV).map(function (k) {
       var p = PROV[k]; var on = k === cur;
       return '<button class="tile ' + (on ? 'on' : '') + '" role="radio" aria-checked="' + on + '" data-act="pick-provider" data-p="' + k + '"><div class="row between" style="width:100%;align-items:flex-start"><b style="font-size:15px">' + esc(p.name) + '</b><span class="radio"></span></div>' +
@@ -827,24 +940,31 @@
     var p = PROV[cur];
     var steps = p.steps.map(function (s, i) { return '<li><span class="k">' + (i + 1) + '</span><span>' + esc(s) + '</span></li>'; }).join('');
     var servers = '';
-    if (cur === 'domain' || m._showServers) {
-      servers = '<div class="form-grid" style="padding-top:16px;border-top:1px solid var(--line-3)">' +
+    var known = !!(m.imap_host && m.smtp_host);
+    if (m._showServers || (cur === 'domain' && known && (m._detected || S.boot.mailbox.imap_host))) {
+      servers = '<div class="stack" style="gap:4px;padding-top:16px;border-top:1px solid var(--line-3)"><div class="row" style="gap:2px"><h3>Serverdaten</h3>' + tipBtn('<strong>Was ist das?</strong>Über diese Server holt Spurlos Mails ab (IMAP) und verschickt sie (SMTP). Bei den meisten Anbietern findet Spurlos sie selbst. Sonst stehen sie im Kundenmenü oder in der Hilfe deines Anbieters, Stichwort „IMAP“ oder „E-Mail-Programm einrichten“.', 'start') + '</div>' + (m._detected ? '<span class="hint">' + esc(m._detected) + '</span>' : '') + '</div>' +
+        '<div class="form-grid">' +
         '<div class="field"><label for="ih">Posteingang (IMAP)</label><input id="ih" class="input mono" data-m="imap_host" value="' + esc(m.imap_host) + '" placeholder="imap.deine-domain.de"></div>' +
         '<div class="field"><label for="ip">Port</label><input id="ip" class="input mono" data-m="imap_port" value="' + esc(m.imap_port) + '"></div>' +
         '<div class="field"><label for="sh">Postausgang (SMTP)</label><input id="sh" class="input mono" data-m="smtp_host" value="' + esc(m.smtp_host) + '" placeholder="smtp.deine-domain.de"></div>' +
         '<div class="field"><label for="sp">Port</label><input id="sp" class="input mono" data-m="smtp_port" value="' + esc(m.smtp_port) + '"></div>' +
         '<div class="field"><label for="ss">Verschlüsselung Postausgang</label><select id="ss" class="input" data-m="smtp_security"><option value="starttls"' + (m.smtp_security !== 'ssl' ? ' selected' : '') + '>STARTTLS (meist Port 587)</option><option value="ssl"' + (m.smtp_security === 'ssl' ? ' selected' : '') + '>SSL/TLS (meist Port 465)</option></select></div>' +
         '<div class="field"><label for="un">Benutzername (falls anders als die Adresse)</label><input id="un" class="input mono" data-m="username" value="' + esc(m.username && m.username !== m.address ? m.username : '') + '"></div></div>' +
-        '<div class="row"><button class="btn sm" data-act="detect-servers">Serverdaten suchen</button>' + (m._detected ? '<span class="small muted">' + esc(m._detected) + '</span>' : '') + '</div>';
+        '<div class="row"><button class="btn sm" data-act="detect-servers">Noch mal suchen</button></div>';
+    } else if (cur === 'domain') {
+      servers = '<div class="row wrap" style="gap:10px;padding-top:16px;border-top:1px solid var(--line-3)"><button class="btn sm" data-act="detect-servers">Serverdaten suchen</button><span class="small muted">Oder einfach auf „Weiter“: Spurlos sucht sie dann selbst.</span>' +
+        '<button class="btn ghost sm" data-act="show-servers">Selbst eintragen</button></div>';
+    } else if (known) {
+      servers = '<div class="row wrap" style="gap:10px;padding-top:16px;border-top:1px solid var(--line-3)"><span class="small muted">' + I.ok + ' Serverdaten für ' + esc(p.name) + ' sind hinterlegt.</span><button class="btn ghost sm" data-act="show-servers">Anzeigen</button></div>';
     }
     return '<div role="radiogroup" aria-label="Anbieter" class="tiles">' + tiles + '</div>' +
       '<section class="card"><div class="row wrap between"><h2 style="font-size:17px">So geht\'s mit ' + esc(p.name) + '</h2>' + (p.open ? '<a class="btn sm" href="' + esc(p.open) + '" target="_blank" rel="noopener">' + I.ext + '<span>Anbieter öffnen</span></a>' : '') + '</div>' +
       '<ol class="ol">' + steps + '</ol><div class="notice">' + I.info + '<span>' + esc(p.note) + '</span></div>' +
       '<div class="form-grid" style="padding-top:16px;border-top:1px solid var(--line-3)">' +
-      '<div class="field"><label for="ma">E-Mail-Adresse</label><input id="ma" class="input" type="email" data-m="address" value="' + esc(m.address) + '" placeholder="' + esc(p.ph) + '" autocomplete="off"></div>' +
-      '<div class="field"><label for="mp">' + esc(p.pw) + '</label><input id="mp" class="input" type="password" data-pw="1" value="' + esc(S.draft.password || '') + '" placeholder="' + (S.boot.mailbox.has_password ? 'gespeichert – nur zum Ändern eintragen' : '••••••••••••') + '" autocomplete="new-password"></div>' +
-      '<div class="field"><label for="md">Absendername</label><input id="md" class="input" data-m="display_name" value="' + esc(m.display_name || ((S.draft.profile.first_name || '') + ' ' + (S.draft.profile.last_name || '')).trim()) + '"></div></div>' +
-      '<span class="row tiny muted" style="gap:4px">' + I.lock + '<span>Dein Passwort wird verschlüsselt im Schlüsselbund deines Macs gespeichert. Nur Spurlos kann diesen einen Eintrag lesen, nicht deine anderen Passwörter.' + (S.boot.secret_storage !== 'Schlüsselbund' ? ' (Hier: ' + esc(S.boot.secret_storage) + ')' : '') + '</span>' +
+      '<div class="field"><label for="ma">E-Mail-Adresse' + REQ + '</label><input id="ma" class="input" type="email" data-m="address" value="' + esc(m.address) + '" placeholder="' + esc(p.ph) + '" autocomplete="off"></div>' +
+      '<div class="field"><label for="mp">' + esc(p.pw) + (S.boot.mailbox.has_password ? '' : REQ) + '</label><input id="mp" class="input" type="password" data-pw="1" value="' + esc(S.draft.password || '') + '" placeholder="' + (S.boot.mailbox.has_password ? 'Gespeichert' : '') + '" autocomplete="new-password">' + (S.boot.mailbox.has_password ? '<span class="hint">Nur ausfüllen, wenn sich das Passwort geändert hat.</span>' : '') + '</div>' +
+      '<div class="field"><label for="md">Absendername</label><input id="md" class="input" data-m="display_name" value="' + esc(m.display_name || ((S.draft.profile.first_name || '') + ' ' + (S.draft.profile.last_name || '')).trim()) + '"><span class="hint">So erscheint dein Name bei den Firmen.</span></div></div>' +
+      '<span class="row tiny muted" style="gap:4px">' + I.lock + '<span>' + (S.boot.secret_storage === 'Schlüsselbund' ? 'Dein Passwort wird verschlüsselt im Schlüsselbund deines Macs gespeichert. Nur Spurlos kann diesen einen Eintrag lesen, nicht deine anderen Passwörter.' : 'Dein Passwort wird auf diesem Rechner in einer geschützten Datei gespeichert (' + esc(S.boot.secret_storage) + ').') + '</span>' +
         '<span class="tipw"><button type="button" class="tipbtn" aria-label="Mehr zum Schlüsselbund" aria-describedby="tip-keychain"><span aria-hidden="true">?</span></button><span role="tooltip" id="tip-keychain" class="tip end"><strong>Warum der Schlüsselbund?</strong>Spurlos meldet sich regelmäßig bei deinem Postfach an und braucht dafür das Passwort. Im Schlüsselbund ist es sicherer als in einer Datei: Andere Programme kommen nur mit deiner Erlaubnis heran. Fragt macOS einmal, ob Spurlos auf den Eintrag „Spurlos“ zugreifen darf, klick auf „Immer erlauben“. Es geht nur um diesen einen Eintrag, nicht um deinen ganzen Schlüsselbund.</span></span></span>' + servers + '</section>' +
       '<span class="tipw"><button class="btn ghost sm" style="color:var(--muted)" aria-describedby="tip-prov">Warum nicht Proton, Tuta oder Outlook.com? <span class="mono">(?)</span></button><span role="tooltip" id="tip-prov" class="tip">Spurlos braucht den normalen Zugang zum Postfach, den jedes Mailprogramm nutzt. Proton erlaubt das nur im Bezahltarif, Tuta gar nicht, und Outlook.com schafft diesen Zugang gerade ab.</span></span>';
   }
@@ -858,24 +978,37 @@
     }
     render();
   };
-  ACT['detect-servers'] = function (el) {
-    var m = S.draft.mailbox;
-    if (!m.address || m.address.indexOf('@') < 0) { toast('Bitte zuerst die E-Mail-Adresse eintragen.', true); return; }
-    busy(el, true);
-    api('/api/mailbox/detect', { body: { provider: 'domain', address: m.address } }).then(function (d) {
+  ACT['show-servers'] = function () { S.draft.mailbox._showServers = true; render(); };
+  function detectServers(m) {
+    return api('/api/mailbox/detect', { body: { provider: m.provider === 'domain' || !m.provider ? 'domain' : m.provider, address: m.address } }).then(function (d) {
       var s = d.servers;
       ['imap_host', 'imap_port', 'smtp_host', 'smtp_port', 'smtp_security'].forEach(function (k) { if (s[k]) m[k] = s[k]; });
       if (s.username) m.username = s.username;
       if (s.provider) m.provider = s.provider;
-      m._detected = s.guessed ? 'Nicht gefunden – das sind nur Vermutungen. Bitte im Kundenmenü deines Anbieters prüfen.' : 'Gefunden. Bitte kurz prüfen.';
-      render();
-    }).catch(fail);
+      m._guessed = !!s.guessed;
+      m._detected = s.guessed ? 'Spurlos hat keine Angaben zu diesem Anbieter gefunden. Das hier sind Vermutungen, bitte im Kundenmenü deines Anbieters prüfen.' : 'Gefunden. Diese Angaben passen normalerweise, du musst nichts ändern.';
+      return s;
+    });
+  }
+  ACT['detect-servers'] = function (el) {
+    var m = S.draft.mailbox;
+    if (!m.address || m.address.indexOf('@') < 0) { showFieldError('ma', 'Bitte zuerst die E-Mail-Adresse eintragen.'); return; }
+    busy(el, true);
+    detectServers(m).then(function () { m._showServers = true; render(); }).catch(function (e) { busy(el, false); fail(e); });
   };
   function saveMailbox(verified) {
     var m = S.draft.mailbox;
-    if (!m.address || m.address.indexOf('@') < 0) return Promise.reject(new Error('Bitte die E-Mail-Adresse eintragen.'));
-    if (!S.draft.password && !S.boot.mailbox.has_password) return Promise.reject(new Error('Bitte das Passwort eintragen.'));
-    if (!m.imap_host || !m.smtp_host) return Promise.reject(new Error('Bitte die Serverdaten eintragen oder suchen lassen.'));
+    if (!m.provider) m.provider = 'gmx';
+    if (!m.address || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(m.address.trim())) return fieldError('ma', 'Bitte die vollständige E-Mail-Adresse eintragen, z. B. name@gmx.de.');
+    if (!S.draft.password && !S.boot.mailbox.has_password) return fieldError('mp', 'Bitte das Passwort eintragen.');
+    m.address = m.address.trim();
+    if (!m.imap_host || !m.smtp_host) {
+      // Serverdaten fehlen noch: selbst suchen, nur bei reinen Vermutungen den Nutzer prüfen lassen
+      return detectServers(m).then(function (s) {
+        if (s.guessed) { m._showServers = true; render(); throw new Error('Spurlos konnte die Serverdaten nicht sicher finden. Bitte prüfe die Vorschläge unten.'); }
+        return saveMailbox(verified);
+      });
+    }
     if (!m.display_name) m.display_name = ((S.draft.profile.first_name || '') + ' ' + (S.draft.profile.last_name || '')).trim();
     var clean = {};
     Object.keys(m).forEach(function (k) { if (k[0] !== '_') clean[k] = m[k]; });
@@ -883,7 +1016,7 @@
     return api('/api/mailbox/save', { body: { mailbox: clean, password: S.draft.password || undefined, verified: verified } }).then(function () {
       if (S.draft.password) S.boot.mailbox.has_password = true;
       S.draft.password = '';
-      Object.assign(S.boot.mailbox, clean);
+      Object.assign(S.boot.mailbox, clean); clearDirty('postfach');
     });
   }
   function testBlock() {
@@ -893,7 +1026,7 @@
     else if (t) {
       res = t.steps.map(function (s) {
         return '<div class="result-step"><span class="' + (s.ok ? 'ico-ok' : 'ico-bad') + '">' + (s.ok ? I.ok : I.x) + '</span><div class="stack" style="gap:2px"><b style="font-weight:500">' + esc(s.name) + '</b><span class="small muted">' + esc(s.detail) + '</span></div></div>';
-      }).join('') + (t.passed ? '<div class="notice ok">' + I.ok + '<span>Alles funktioniert. Die Testmail liegt gleich in deinem Posteingang.</span></div>' : '<div class="notice bad">' + I.warn + '<span>Bitte prüfe die Angaben beim Postfach und teste noch einmal.</span></div>');
+      }).join('') + (t.passed ? '<div class="notice ok">' + I.ok + '<span>Alles funktioniert. Die Testmail liegt gleich in deinem Posteingang.</span></div>' : '<div class="notice bad">' + I.warn + '<span>Das hat noch nicht geklappt. Meist liegt es am Passwort oder daran, dass der Zugriff für Mailprogramme im Postfach noch nicht erlaubt ist. Prüfe die Angaben und teste noch einmal.</span></div>');
     }
     return '<section class="card"><div class="row wrap between"><h2>Verbindung testen</h2><button class="btn ' + (t && t !== 'running' && t.passed ? '' : 'p') + '" data-act="run-test"' + (t === 'running' ? ' disabled' : '') + '>' + (t ? 'Noch mal testen' : 'Test starten') + '</button></div>' +
       '<p class="small muted" style="margin:0">Spurlos meldet sich am Posteingang und am Postausgang an und schickt eine Testmail an ' + esc(S.boot.mailbox.address || 'dich') + '.</p>' + res + '</section>';
@@ -906,14 +1039,19 @@
     }).then(render).catch(function (e) { S.testResult = null; render(); fail(e); });
   };
 
-  function kiBlock() {
+  function kiBlock(compact) {
     var cur = S.draft.ai.provider || 'none';
+    if (compact && !S.ui.kiExpand && cur === 'none') {
+      return '<section class="card" style="gap:16px"><div class="stack" style="gap:8px"><h2 style="font-size:19px">Spurlos erkennt Antworten auch ohne KI</h2>' +
+        '<p style="margin:0;line-height:1.55;color:var(--ink-2)">Die meisten Firmen antworten mit Standardsätzen wie „keine Daten gespeichert“. Die erkennt Spurlos von selbst. Nur bei ungewöhnlichen Antworten fragt es dich. Eine KI kann dabei helfen, ist aber nicht nötig und braucht etwas Einrichtung.</p></div>' +
+        '<div class="row wrap"><button class="btn" data-act="ki-expand">KI-Möglichkeiten ansehen</button><span class="small muted">Geht auch später in den Einstellungen.</span></div></section>';
+    }
     var st = S.aiStatus;
     if (!st) { api('/api/ai/status').then(function (d) { S.aiStatus = d; render(); }).catch(function () { S.aiStatus = { apple: {}, ollama: {}, cloud: {} }; }); }
     var apple = st ? st.apple : {};
     var oll = st ? st.ollama : {};
     var cards = [
-      { id: 'none', name: 'Ohne KI', text: 'Erkennt Antworten an typischen Formulierungen. Klappt bei Standardantworten gut.', chips: [['Standard', 'planned'], ['Keine Einrichtung', 'planned']] },
+      { id: 'none', name: 'Ohne KI', text: 'Spurlos erkennt Antworten an typischen Formulierungen. Klappt bei Standardantworten gut, bei ungewöhnlichen fragt es dich.', chips: [['Keine Einrichtung nötig', 'done'], ['Nichts verlässt den Mac', 'done']] },
       { id: 'apple', name: 'Apple Intelligence', text: 'Läuft direkt auf deinem Mac, ohne Internet und ohne Kosten. Braucht macOS 26, einen Mac mit M-Chip und eingeschaltete Apple Intelligence.',
         chips: [['Kostenlos', 'done'], ['Offline', 'done'], [st ? (apple.ok ? 'Auf diesem Mac verfügbar' : 'Nicht verfügbar') : 'Prüfe …', apple.ok ? 'done' : 'todo']],
         extra: st && !apple.ok ? '<span class="tiny muted">' + esc(apple.text || '') + '</span>' : '' },
@@ -941,6 +1079,7 @@
       '<div class="row wrap between" style="padding:14px 16px;border-radius:10px;background:var(--soft);border:1px solid var(--line-3)"><div class="stack" style="gap:2px"><b style="font-weight:500">Mit einer Beispielantwort testen</b><span class="mono tiny muted">' + esc(S.ui.aiTest || 'Noch nicht getestet') + '</span></div><button class="btn sm" data-act="ai-test">Test starten</button></div>' +
       '<div class="row small muted" style="align-items:flex-start">' + I.lock + '<span>Die KI sieht nur den Text einer Antwort. Mit Apple Intelligence oder einem lokalen Modell verlässt nichts deinen Mac. Egal welche Einstellung: Spurlos verschickt nichts ohne deine Bestätigung.</span></div></section>';
   }
+  ACT['ki-expand'] = function () { S.ui.kiExpand = true; render(); };
   ACT['ai-pick'] = function (el) {
     S.draft.ai.provider = el.dataset.id;
     api('/api/settings/ai', { body: { provider: el.dataset.id } }).then(function (d) { S.boot.ai.provider = d.ai.provider; render(); }).catch(fail);
@@ -961,7 +1100,7 @@
   };
 
   // ------------------------------------------------------------------ Einrichtung
-  var STEPS = [['Deine Daten', 'Name, Adressen, Nummern'], ['Postfach', 'Woher die Anfragen kommen'], ['Verbinden & testen', 'Testmail an dich selbst'],
+  var STEPS = [['Meine Daten', 'Name, Adressen, Nummern'], ['Postfach', 'Woher die Anfragen kommen'], ['Verbinden & testen', 'Testmail an dich selbst'],
     ['KI-Assistent', 'Optional'], ['Start', 'Firmen wählen, loslegen']];
   function renderSetup(r) {
     var step = +(r.page === 'einrichtung' && r.arg ? r.arg : S.boot.setup_step || 1);
@@ -970,7 +1109,9 @@
       '<div class="stack" style="gap:8px"><span class="label" style="color:var(--side-ink)">Einrichtung</span><p style="margin:0;font-size:15px;line-height:1.5;color:#E6E9EE">In fünf Schritten startklar. Danach schreibt Spurlos die Datenhändler für dich an.</p></div>' +
       '<ol class="steps">' + STEPS.map(function (s, i) {
         var n = i + 1; var cls = n === step ? 'now' : n < step ? 'done' : '';
-        return '<li class="' + cls + '"><span class="n">' + (n < step ? '✓' : '0' + n) + '</span><div><b>' + s[0] + '</b><span class="tiny">' + s[1] + '</span></div></li>';
+        var reach = n < step || n <= (S.boot.setup_step || 1) || S.boot.setup_done;
+        var inner = '<span class="n">' + (n < step ? '✓' : '0' + n) + '</span><div><b>' + s[0] + '</b><span class="tiny">' + s[1] + '</span></div>';
+        return '<li class="' + cls + '">' + (reach && n !== step ? '<a href="#/einrichtung/' + n + '">' + inner + '</a>' : inner) + '</li>';
       }).join('') + '</ol></div>' +
       '<div class="row small" style="align-items:flex-start;line-height:1.5">' + I.lock + '<span>Alles bleibt auf deinem Mac. Spurlos hat keinen eigenen Server und kein Benutzerkonto.</span></div>' +
       (S.boot.setup_done ? '<a class="btn sm" href="#/uebersicht" style="background:transparent;color:#E6E9EE;border-color:#2B3240">Zurück zur Übersicht</a>' : '') + '</aside>';
@@ -980,18 +1121,18 @@
         '<button class="btn p" data-act="setup-next" data-step="' + step + '">' + (label || 'Weiter') + '</button></div>';
     };
     if (step === 1) {
-      content = '<div class="stack" style="gap:10px"><span class="eyebrow" style="color:var(--accent)">Schritt 1 von 5 · Deine Daten</span><h1>Nach welchen Angaben sollen die Firmen suchen?</h1>' +
-        '<p class="lead">Je vollständiger, desto besser finden dich die Firmen in ihren Datenbanken. Diese Angaben bleiben auf deinem Mac und stehen nur in deinen Anfragen.</p></div>' + profileForm() + nav(0, 2, 'Weiter: Postfach');
+      content = '<div class="stack" style="gap:10px"><span class="eyebrow" style="color:var(--accent)">Schritt 1 von 5 · Meine Daten</span><h1>Nach welchen Angaben sollen die Firmen suchen?</h1>' +
+        '<p class="lead">Je vollständiger, desto besser finden dich die Firmen in ihren Datenbanken. Diese Angaben bleiben auf deinem Mac und stehen nur in deinen Anfragen. Felder mit * sind nötig, alles andere ist freiwillig.</p></div>' + profileForm() + nav(0, 2, 'Weiter: Postfach');
     } else if (step === 2) {
       content = '<div class="stack" style="gap:10px"><span class="eyebrow" style="color:var(--accent)">Schritt 2 von 5 · Postfach</span><h1>Über welches Postfach soll Spurlos schreiben?</h1>' +
-        '<p class="lead">Aus diesem Postfach gehen deine Anfragen raus, und hier kommen die Antworten der Firmen an. Am besten nimmst du eine eigene Adresse nur für dieses Projekt.</p></div>' + mailboxForm() + nav(1, 3, 'Weiter: Verbindung testen');
+        '<p class="lead">Aus diesem Postfach gehen deine Anfragen raus, und hier kommen die Antworten der Firmen an. Am besten legst du dafür eine neue, kostenlose Adresse an, dann bleibt dein normales Postfach sauber.</p></div>' + mailboxForm() + nav(1, 3, 'Weiter: Verbindung testen');
     } else if (step === 3) {
       content = '<div class="stack" style="gap:10px"><span class="eyebrow" style="color:var(--accent)">Schritt 3 von 5 · Verbinden & testen</span><h1>Klappt die Verbindung?</h1>' +
         '<p class="lead">Spurlos prüft, ob es sich anmelden und Mails verschicken kann.</p></div>' + testBlock() +
         '<div class="row wrap between"><a class="btn" href="#/einrichtung/2">Zurück</a><button class="btn p" data-act="setup-next" data-step="3"' + (S.testResult && S.testResult.passed ? '' : (S.boot.mailbox.verified ? '' : ' disabled')) + '>Weiter: KI-Assistent</button></div>';
     } else if (step === 4) {
       content = '<div class="stack" style="gap:10px"><span class="eyebrow" style="color:var(--accent)">Schritt 4 von 5 · KI-Assistent (optional)</span><h1>Soll eine KI beim Einordnen helfen?</h1>' +
-        '<p class="lead">Spurlos funktioniert auch ohne KI. Du kannst das später jederzeit in den Einstellungen ändern.</p></div>' + kiBlock() + nav(3, 5, 'Weiter: Start');
+        '<p class="lead">Spurlos funktioniert auch ohne KI. Du kannst das später jederzeit in den Einstellungen ändern.</p></div>' + kiBlock(true) + nav(3, 5, (S.draft.ai.provider || 'none') === 'none' ? 'Weiter ohne KI' : 'Weiter: Start');
     } else {
       content = renderStartStep() ;
     }
@@ -1018,12 +1159,12 @@
     }
     var etaLine = S.ui.eta == null ? 'Spurlos rechnet …' : (totalMail ? 'Alle ' + totalMail + ' Anfragen sind voraussichtlich <b>' + etaText(S.ui.eta) + '</b> verschickt.' : 'Keine Firma mit E-Mail-Adresse ausgewählt.');
     return '<div class="stack" style="gap:10px"><span class="eyebrow" style="color:var(--accent)">Schritt 5 von 5 · Start</span><h1>Welche Firmen soll Spurlos anschreiben?</h1>' +
-      '<p class="lead">Die Liste richtet sich nach deinen Ländern (' + esc(S.boot.countries.map(function (c) { return S.boot.all_countries[c]; }).join(', ')) + '). Einzelne Firmen kannst du später in der Händlerliste ab- oder zuschalten.</p></div>' +
-      '<section class="card">' + (d ? rows : '<div class="empty"><span class="spin"></span></div>') + (d ? '<div class="notice ok">' + I.info + '<span><b>' + totalSel + ' Firmen ausgewählt, ' + totalMail + ' davon per E-Mail.</b> Firmen ohne Mailadresse landen unter „Kontakt fehlt“ oder „Formular offen“, dort kannst du sie nachtragen.</span></div>' : '') + '</section>' +
+      '<p class="lead">Die Liste richtet sich nach deinen Ländern (' + esc(S.boot.countries.map(function (c) { return S.boot.all_countries[c]; }).join(', ')) + '). Einzelne Firmen kannst du später in der Firmenliste ab- oder zuschalten.</p></div>' +
+      '<section class="card">' + (d ? rows : '<div class="empty"><span class="spin"></span></div>') + (d ? '<div class="notice ok">' + I.info + '<span><b>' + totalSel + ' Firmen ausgewählt, ' + totalMail + ' davon per E-Mail.</b> Firmen ohne Mailadresse bekommen den Status „Formular nötig“ oder „Kontakt fehlt“. Spurlos zeigt sie dir, sobald die Mail-Anfragen laufen.</span></div>' : '') + '</section>' +
       '<section class="card"><div class="row" style="gap:2px"><h2>Versand</h2>' + tipBtn(SEND_TIP, 'start', 'Warum nicht alle auf einmal?') + '</div>' +
       '<p style="margin:0">' + etaLine + '</p><span class="small muted">Die erste Anfrage geht sofort raus, die weiteren einzeln über den Tag verteilt. Du musst nichts einstellen.</span></section>' +
-      '<section class="card"><div class="row wrap between"><div class="stack" style="gap:2px"><h2>So sieht deine Anfrage aus</h2><span class="small muted">Mit deinen Daten. Firmen in Deutschland und Österreich bekommen sie auf Deutsch, Schweizer Firmen nach Schweizer Recht, alle anderen auf Englisch.</span></div><div class="row wrap"><button class="btn sm" data-act="sample" data-lang="de">Deutsch</button>' + (S.boot.countries.indexOf('ch') >= 0 ? '<button class="btn sm" data-act="sample" data-lang="ch">Schweiz</button>' : '') + '<button class="btn sm" data-act="sample" data-lang="en">Englisch</button></div></div></section>' +
-      '<div class="notice warn">' + I.warn + '<span>Lass Spurlos geöffnet, solange es arbeiten soll. Es verschickt Anfragen und ruft das Postfach nur ab, während das Programm läuft. Schläft dein Mac oder ist Spurlos zu, holt es alles beim nächsten Start nach.</span></div>' +
+      '<section class="card"><div class="row wrap between"><div class="stack" style="gap:2px"><h2>So sieht deine Anfrage aus</h2><span class="small muted">Mit deinen Daten. Firmen in Deutschland und Österreich bekommen sie auf Deutsch, Schweizer Firmen nach Schweizer Recht, alle anderen auf Englisch.</span></div><div class="row wrap"><button class="btn sm" data-act="sample" data-lang="de">Beispiel auf Deutsch</button>' + (S.boot.countries.indexOf('ch') >= 0 ? '<button class="btn sm" data-act="sample" data-lang="ch">Beispiel für die Schweiz</button>' : '') + '<button class="btn sm" data-act="sample" data-lang="en">Beispiel auf Englisch</button></div></div></section>' +
+      '<div class="notice warn">' + I.warn + '<span>Lass Spurlos laufen, solange es arbeiten soll. Das Fenster kannst du schließen, Spurlos arbeitet im Hintergrund weiter (Symbol im Dock). Erst „Beenden“ stoppt es. Schläft dein Mac oder ist Spurlos beendet, holt es alles beim nächsten Start nach.</span></div>' +
       '<div class="row wrap between"><a class="btn" href="#/einrichtung/4">Zurück</a><button class="btn p" data-act="start">Anfragen starten</button></div>';
   }
   ACT.sample = function (el) {
@@ -1111,9 +1252,9 @@
       var s = S.draft.sending;
       body = '<section class="card"><div class="stack" style="gap:4px"><h2 style="font-size:19px">Fristen & Versand</h2><span class="small muted">Wie schnell Spurlos schreibt und wann es nachhakt.</span></div><div class="form-grid">' +
         '<div class="field" style="grid-column:1 / -1"><div class="row" style="gap:2px"><label>Versand</label>' + tipBtn(SEND_TIP, 'start', 'Warum nicht alle auf einmal?') + '</div><span class="hint">Spurlos verschickt die Anfragen einzeln zwischen 8 und 20 Uhr und steigert die Menge von Tag zu Tag. Das lässt sich nicht einstellen, damit nichts im Spam landet.</span></div>' +
-        numField('reminder_days', 'Erinnerung nach (Tagen)', 'Firmen haben einen Monat Zeit für die Antwort.') +
+        numField('reminder_days', 'Erinnerung nach (Tagen)', 'Firmen haben einen Monat Zeit für die Antwort. Erst danach erinnert Spurlos.') +
         numField('complaint_days', 'Beschwerde-Text nach weiteren (Tagen)', 'Zählt ab der Erinnerung.') +
-        numField('poll_minutes', 'Postfach abrufen alle (Minuten)', '') + '</div>' +
+        numField('poll_minutes', 'Postfach abrufen alle (Minuten)', 'Wie oft Spurlos nach neuen Antworten schaut.') + '</div>' +
         '<label class="check"><input type="checkbox" data-send="auto_remind"' + (s.auto_remind ? ' checked' : '') + '> Erinnerungen automatisch verschicken</label>' +
         '<label class="check"><input type="checkbox" data-send="notifications"' + (s.notifications ? ' checked' : '') + '> Mitteilungen auf dem Mac bei neuen Antworten</label>' +
         '<div><button class="btn p" data-act="save-sending">Speichern</button></div></section>';
@@ -1133,23 +1274,33 @@
     } else {
       body = '<section class="card"><div class="row">' + LOGO + '<div class="stack" style="gap:2px"><h2 style="font-size:19px">Spurlos</h2><span class="mono small muted">Version ' + esc(S.boot.version) + '</span></div></div>' +
         '<p class="small" style="margin:0;line-height:1.55;color:var(--ink-2)">Holt deine Daten bei Datenhändlern zurück. Läuft nur auf deinem Mac, ohne Server und ohne Konto. Spurlos hilft dir, deine Rechte wahrzunehmen, ersetzt aber keine Rechtsberatung.</p></section>' +
+        '<section class="card"><h3>Geplant für spätere Versionen</h3><ul class="small" style="margin:0;padding-left:18px;line-height:1.7;color:var(--ink-2)"><li>Briefe drucken für Firmen, die nur per Post antworten</li><li>Antworten per Brief einscannen</li><li>Weitere Spuren: Suchmaschinen, Personensuchseiten</li></ul></section>' +
         '<section class="card"><h3>Quellen</h3><ul class="small" style="margin:0;padding-left:18px;line-height:1.7;color:var(--ink-2)"><li>Firmenkontakte: datenanfragen.de (offene Datenbank, CC0)</li><li>EU-Datenhändler: öffentliche Liste von Incogni</li><li>USA: Datenhändler-Register von Kalifornien (CPPA)</li><li>Musterbriefe: datenanfragen.de, Verbraucherzentralen, LfDI Baden-Württemberg</li><li>Schrift: IBM Plex (SIL Open Font License)</li></ul></section>';
     }
     return head('Alles wird nur auf diesem Mac gespeichert', 'Einstellungen') + '<div class="row wrap" style="align-items:flex-start;gap:28px">' + nav + '<div style="flex:4 1 520px;min-width:0" class="stack">' + body + '</div></div>';
   }
   function numField(k, label, hint) {
-    return '<div class="field"><label for="f-' + k + '">' + label + '</label><input id="f-' + k + '" class="input mono" type="number" min="1" data-send="' + k + '" value="' + esc(S.draft.sending[k]) + '">' + (hint ? '<span class="hint">' + hint + '</span>' : '') + '</div>';
+    var lim = { reminder_days: [7, 90], complaint_days: [3, 90], poll_minutes: [5, 240] }[k] || [1, 999];
+    return '<div class="field"><label for="f-' + k + '">' + label + '</label><input id="f-' + k + '" class="input mono" type="number" min="' + lim[0] + '" max="' + lim[1] + '" data-send="' + k + '" value="' + esc(S.draft.sending[k]) + '">' + (hint ? '<span class="hint">' + hint + '</span>' : '') + '</div>';
   }
   ACT['set-tab'] = function (el) { S.ui.setTab = el.dataset.t; history.replaceState(null, '', '#/einstellungen/' + el.dataset.t); render(); };
   ACT['save-profile'] = function (el) { busy(el, true); saveProfile().then(function () { toast('Gespeichert'); return refreshData(); }).then(render).catch(function (e) { busy(el, false); fail(e); }); };
-  ACT['save-mailbox'] = function (el) { busy(el, true); saveMailbox(false).then(function () { S.testResult = null; toast('Gespeichert. Bitte einmal testen.'); render(); }).catch(function (e) { busy(el, false); fail(e); }); };
+  ACT['save-mailbox'] = function (el) { busy(el, true); saveMailbox(false).then(function () { S.testResult = null; toast('Gespeichert. Teste die Verbindung einmal.'); render(); }).catch(function (e) { busy(el, false); fail(e); }); };
   ACT['save-sending'] = function (el) {
     var s = S.draft.sending;
     document.querySelectorAll('[data-send]').forEach(function (n) { if (n.type === 'checkbox') s[n.dataset.send] = n.checked; });
-    api('/api/settings/sending', { body: s }).then(function (d) { S.boot.sending = d.sending; toast('Gespeichert'); }).catch(fail);
+    var lim = { reminder_days: [7, 90, 'Tage'], complaint_days: [3, 90, 'Tage'], poll_minutes: [5, 240, 'Minuten'] };
+    for (var k in lim) {
+      var v = +s[k];
+      if (!(v >= lim[k][0] && v <= lim[k][1])) { showFieldError('f-' + k, 'Bitte zwischen ' + lim[k][0] + ' und ' + lim[k][1] + ' ' + lim[k][2] + '.'); return; }
+    }
+    busy(el, true);
+    api('/api/settings/sending', { body: s }).then(function (d) { S.boot.sending = d.sending; clearDirty('fristen'); toast('Gespeichert'); render(); }).catch(function (e) { busy(el, false); fail(e); });
   };
   ACT.tpl = function (el) {
-    api('/api/sample?kind=' + el.dataset.id + '&lang=' + el.dataset.lang).then(function (d) { textModal('Vorlage', 'Mit deinen Daten. Aktenzeichen und Datum werden pro Firma eingesetzt.', d.subject, d.body); }).catch(fail);
+    var t = S.boot.templates.filter(function (x) { return x.id === el.dataset.id; })[0];
+    var lang = { de: 'Deutsch', ch: 'Schweiz', en: 'Englisch' }[el.dataset.lang];
+    api('/api/sample?kind=' + el.dataset.id + '&lang=' + el.dataset.lang).then(function (d) { textModal((t ? t.label : 'Vorlage') + ' · ' + lang, 'Mit deinen Daten. Aktenzeichen und Datum werden pro Firma eingesetzt.', d.subject, d.body); }).catch(fail);
   };
   ACT['export'] = function (el) {
     busy(el, true);
@@ -1180,9 +1331,15 @@
   };
   ACT['open-log'] = function () { if (window.pywebview && window.pywebview.api) window.pywebview.api.open_log(); };
   ACT.reset = function () {
-    var v = prompt('Wirklich alles löschen? Tippe LÖSCHEN ein.');
-    if (v !== 'LÖSCHEN') return;
-    api('/api/reset', { body: { confirm: v } }).then(function () { S.draft = null; return load(); }).then(function () { go('#/einrichtung/1'); }).catch(fail);
+    openModal('<h2>Alle Daten löschen?</h2><p style="margin:0;line-height:1.55">Spurlos entfernt deine Angaben, alle Anfragen und Antworten von diesem Mac. Das lässt sich nicht rückgängig machen. Die Firmen behalten die Anfragen, die sie schon bekommen haben.</p>' +
+      '<div class="field"><label for="rs">Zur Sicherheit: Tippe <b>LÖSCHEN</b> ein</label><input id="rs" class="input" autocomplete="off"></div>' +
+      '<div class="row wrap"><button class="btn p danger-p" data-act="reset-go">Alles löschen</button><button class="btn" data-act="close-modal">Abbrechen</button></div>');
+  };
+  ACT['reset-go'] = function (el) {
+    var v = document.getElementById('rs').value.trim();
+    if (v !== 'LÖSCHEN') { showFieldError('rs', 'Bitte genau LÖSCHEN eintippen.'); return; }
+    busy(el, true);
+    api('/api/reset', { body: { confirm: v } }).then(function () { closeModal(); S.draft = null; S.dirty = {}; return load(); }).then(function () { go('#/einrichtung/1'); }).catch(function (e) { busy(el, false); fail(e); });
   };
 
   // ------------------------------------------------------------------ Start
@@ -1220,11 +1377,13 @@
     if (document.visibilityState === 'visible' && S.boot && S.boot.setup_done) refreshData().then(render).catch(function () {});
   });
   boot(0);
+  function snapshot() { return JSON.stringify([S.overview, S.inbox, S.unassigned, S.requests, S.brokers, S.reqDetail]); }
   setInterval(function () {
     if (!S.boot || !S.boot.setup_done) return;
     var a = document.activeElement;
     if (a && /INPUT|TEXTAREA|SELECT/.test(a.tagName)) return;
     if ($modal.innerHTML) return;
-    refreshData().then(render).catch(function () { /* still */ });
+    var before = snapshot();
+    refreshData().then(function () { if (snapshot() !== before) render(); }).catch(function () { /* still */ });
   }, 60000);
 })();
