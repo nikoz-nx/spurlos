@@ -16,6 +16,39 @@ import urllib.request
 
 from . import __version__
 
+CERTS = "Python"
+
+
+def use_mac_certificates() -> str:
+    """Zertifikate für verschlüsselte Verbindungen (Mailserver, Firmenliste, Cloud-KI).
+
+    In der fertigen App findet Python die Zertifikate des Macs nicht von selbst.
+    truststore nutzt die Zertifikatsverwaltung von macOS, certifi ist die Notlösung.
+    Gilt für alle Verbindungen des Programms, nicht nur für E-Mail.
+    """
+    try:
+        import truststore
+        truststore.inject_into_ssl()
+        return "macOS"
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        import certifi
+        os.environ.setdefault("SSL_CERT_FILE", certifi.where())
+        return "certifi"
+    except Exception:  # noqa: BLE001
+        return "Python"
+
+
+def _check_tls() -> str:
+    """Prüft eine verschlüsselte Verbindung (nur beim automatischen Bauen, braucht Internet)."""
+    import socket
+    import ssl
+    ctx = ssl.create_default_context()
+    with socket.create_connection(("imap.gmx.net", 993), timeout=15) as raw:
+        with ctx.wrap_socket(raw, server_hostname="imap.gmx.net") as tls:
+            return tls.version() or "TLS"
+
 
 GERMAN = {
     "global.quitConfirmation": "Spurlos beenden? Solange Spurlos geschlossen ist, verschickt es keine Anfragen "
@@ -48,7 +81,7 @@ def selftest() -> int:
     """
     os.environ["SPURLOS_HOME"] = tempfile.mkdtemp(prefix="spurlos-selftest-")
     os.environ["SPURLOS_FILE_SECRETS"] = "1"
-    from . import brokers, db, server
+    from . import db, server
 
     run = server.start(18765, with_scheduler=False)
     try:
@@ -62,7 +95,9 @@ def selftest() -> int:
         count = db.query_one("SELECT COUNT(*) AS n FROM brokers")["n"]
         if count < 100:
             raise RuntimeError("Firmenliste zu kurz: %d" % count)
-        print("Selbsttest OK: Spurlos %s, %d Firmen, %s" % (__version__, count, brokers.__name__))
+        tls = _check_tls() if os.environ.get("SPURLOS_SELFTEST_NET") == "1" else "nicht geprüft"
+        print("Selbsttest OK: Spurlos %s, %d Firmen, Zertifikate: %s, Verbindung: %s"
+              % (__version__, count, CERTS, tls))
         return 0
     finally:
         run.stop()
@@ -72,6 +107,8 @@ def main(argv=None) -> int:
     parser = argparse.ArgumentParser(prog="Spurlos")
     parser.add_argument("--selftest", action="store_true", help="Programm prüfen und beenden")
     args, _unknown = parser.parse_known_args(argv)   # macOS hängt manchmal eigene Argumente an
+    global CERTS
+    CERTS = use_mac_certificates()
     if args.selftest:
         return selftest()
 

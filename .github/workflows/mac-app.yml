@@ -84,6 +84,8 @@ jobs:
           lipo -info dist/Spurlos.app/Contents/MacOS/Spurlos
 
       - name: Fertige App prüfen
+        env:
+          SPURLOS_SELFTEST_NET: "1"
         run: dist/Spurlos.app/Contents/MacOS/Spurlos --selftest
 
       - name: DMG erstellen
